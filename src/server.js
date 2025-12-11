@@ -13,6 +13,7 @@ import feedsRoutes from './routes/feeds.js';
 import adminRoutes from './routes/admin.js';
 import eventsRoutes from './routes/events.js';
 import interactionsRoutes from './routes/interactions.js';
+import usersRoutes from './routes/users.js';
 import Scheduler from './scheduler/jobs.js';
 
 dotenv.config();
@@ -43,6 +44,7 @@ app.use('/api/categories', categoriesRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/interactions', interactionsRoutes);
+app.use('/api/users', usersRoutes);
 app.use('/feeds', feedsRoutes);
 
 // 404 Handler
