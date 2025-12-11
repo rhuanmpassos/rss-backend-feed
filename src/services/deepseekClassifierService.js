@@ -68,38 +68,54 @@ const DeepSeekClassifierService = {
 
     const text = summary ? `${title}. ${summary}` : title;
 
-    // Prompt otimizado para DeepSeek R1
-    const prompt = `Você é um classificador de notícias brasileiras especializado.
-Classifique este artigo de forma ESPECÍFICA e precisa.
+    // Prompt baseado em INTERESSES REAIS
+    const prompt = `Você é um classificador de notícias brasileiras.
+Classifique pensando em INTERESSES que pessoas realmente seguem.
 
 TEXTO: "${text}"
 
-REGRAS DE CLASSIFICAÇÃO:
-1. Seja ESPECÍFICO - Use categorias precisas ao invés de genéricas:
-   - "Fórmula 1" ao invés de "Esportes"
-   - "Badminton" ao invés de "Esportes"
-   - "Bitcoin" ao invés de "Economia"
-   - "Inteligência Artificial" ao invés de "Tecnologia"
-   
-2. Use nomes claros e diretos em português
+PRINCÍPIO:
+Pense: "Que tipo de pessoa se interessaria? O que ela SEGUE?"
+- Alguém segue "Política", não "Votação no Congresso"
+- Alguém segue "Tecnologia", não "Vazamento de Dados"
+- Alguém segue "Economia", não "Energia Elétrica"
+- MAS alguém segue "Futebol" especificamente
+- MAS alguém segue "Fórmula 1" especificamente
+- MAS alguém segue "Bitcoin" especificamente
 
-3. TIMES DE FUTEBOL NÃO SÃO LOCALIZAÇÃO:
-   - "Bahia", "Fortaleza", "São Paulo", "Goiás", etc. em contexto de futebol → location: null
-   
-4. LOCATION só é preenchido se menciona um LUGAR GEOGRÁFICO explicitamente
-   Estados válidos: ${BRAZILIAN_STATES.join(', ')}
+CATEGORIAS ESPECÍFICAS (interesses reais):
+- Esportes: Futebol, Fórmula 1, MMA/UFC, Tênis, Basquete, etc.
+- Tech: Inteligência Artificial, Games, Apple, Android
+- Finanças: Bitcoin, Criptomoedas, Bolsa de Valores
+- Entretenimento: Cinema, Séries, K-Pop, Música
 
-FORMATO DE RESPOSTA (APENAS JSON):
-{"category":"NOME_ESPECÍFICO","confidence":0.95,"location":"ESTADO_OU_null"}
+CATEGORIAS AMPLAS (eventos vão aqui):
+- Política: votações, escândalos, eleições, STF, Congresso
+- Economia: inflação, PIB, energia, combustíveis
+- Tecnologia: vazamentos, hacks, lançamentos gerais
+- Segurança: crimes, prisões, operações policiais
+- Saúde: doenças, vacinas, hospitais
+- Meio Ambiente: desmatamento, clima, queimadas
+
+REGRAS:
+1. INTERESSE REAL específico → categoria específica
+2. EVENTO/SITUAÇÃO → categoria ampla
+3. Times de futebol NÃO são localização
+4. Estados válidos: ${BRAZILIAN_STATES.join(', ')}
+
+FORMATO (APENAS JSON):
+{"category":"CATEGORIA","confidence":0.95,"location":"ESTADO_OU_null"}
 
 EXEMPLOS:
-- "Hamilton vence GP de Mônaco" → {"category":"Fórmula 1","confidence":0.98,"location":null}
-- "Bahia contrata atacante do Flamengo" → {"category":"Futebol","confidence":0.95,"location":null}
-- "Bitcoin atinge novo recorde histórico" → {"category":"Bitcoin","confidence":0.95,"location":null}
-- "Chuvas fortes causam alagamentos na Bahia" → {"category":"Clima","confidence":0.90,"location":"Bahia"}
-- "OpenAI lança nova versão do ChatGPT" → {"category":"Inteligência Artificial","confidence":0.95,"location":null}
+- "Câmara vota cassação" → {"category":"Política","confidence":0.98,"location":null}
+- "Dados vazam de empresa" → {"category":"Tecnologia","confidence":0.92,"location":null}
+- "Conta de luz sobe" → {"category":"Economia","confidence":0.95,"location":null}
+- "Hamilton vence GP" → {"category":"Fórmula 1","confidence":0.98,"location":null}
+- "Flamengo contrata" → {"category":"Futebol","confidence":0.98,"location":null}
+- "Bitcoin bate recorde" → {"category":"Bitcoin","confidence":0.95,"location":null}
+- "ChatGPT nova função" → {"category":"Inteligência Artificial","confidence":0.95,"location":null}
 
-Retorne APENAS o JSON, sem explicações ou texto adicional.`;
+Retorne APENAS o JSON.`;
 
     try {
       const accessToken = await this.getAccessToken();

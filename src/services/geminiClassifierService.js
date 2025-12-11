@@ -45,36 +45,55 @@ const GeminiClassifierService = {
 
     const text = summary ? `${title}. ${summary}` : title;
 
-    // Prompt para classificação LIVRE - sem lista fixa
+    // Prompt para classificação baseada em INTERESSES REAIS
     const prompt = `Você é um classificador de notícias brasileiras especializado.
-Classifique este artigo de forma ESPECÍFICA e precisa.
+Classifique este artigo pensando em INTERESSES REAIS que pessoas seguem.
 
 TEXTO: "${text}"
 
-REGRAS DE CLASSIFICAÇÃO:
-1. Seja ESPECÍFICO - Use categorias precisas ao invés de genéricas:
-   - "Fórmula 1" ao invés de "Esportes"
-   - "Badminton" ao invés de "Esportes"
-   - "Bitcoin" ao invés de "Economia"
-   - "Inteligência Artificial" ao invés de "Tecnologia"
-   
-2. Use nomes claros e diretos em português
+PRINCÍPIO FUNDAMENTAL:
+Pense assim: "Que tipo de pessoa se interessaria por essa notícia? O que ela SEGUE?"
+- Alguém segue "Política", não "Votação no Congresso"
+- Alguém segue "Tecnologia", não "Vazamento de Dados Sigilosos"
+- Alguém segue "Economia", não "Energia Elétrica"
+- MAS alguém segue "Futebol" especificamente, não só "Esportes"
+- MAS alguém segue "Fórmula 1" especificamente, não só "Automobilismo"
+- MAS alguém segue "Bitcoin" especificamente, não só "Economia"
 
-3. TIMES DE FUTEBOL NÃO SÃO LOCALIZAÇÃO:
-   - "Bahia", "Fortaleza", "São Paulo", "Goiás", etc. em contexto de futebol → location: null
-   
-4. LOCATION só é preenchido se menciona um LUGAR GEOGRÁFICO explicitamente
+CATEGORIAS ESPECÍFICAS (pessoas realmente seguem isso):
+- Esportes: Futebol, Fórmula 1, MMA/UFC, Tênis, Basquete, Vôlei, etc.
+- Tech: Inteligência Artificial, Games, Apple, Android, etc.
+- Finanças: Bitcoin, Criptomoedas, Bolsa de Valores, etc.
+- Entretenimento: Cinema, Séries, K-Pop, Música, etc.
+
+CATEGORIAS AMPLAS (eventos específicos vão aqui):
+- Política: votações, escândalos, eleições, STF, Congresso
+- Economia: inflação, PIB, energia, combustíveis, preços
+- Tecnologia: vazamentos, hacks, lançamentos genéricos
+- Segurança: crimes, prisões, operações policiais
+- Saúde: doenças, vacinas, hospitais
+- Educação: escolas, universidades, vestibular
+- Meio Ambiente: desmatamento, clima, queimadas
+
+REGRAS:
+1. Se é um INTERESSE REAL específico → use categoria específica
+2. Se é um EVENTO/SITUAÇÃO → use categoria ampla do tema
+3. TIMES DE FUTEBOL NÃO SÃO LOCALIZAÇÃO (Bahia, Fortaleza, São Paulo FC → location: null)
+4. LOCATION só para lugares geográficos explícitos
    Estados válidos: ${BRAZILIAN_STATES.join(', ')}
 
-FORMATO DE RESPOSTA (APENAS JSON):
-{"category":"NOME_ESPECÍFICO","confidence":0.95,"location":"ESTADO_OU_null"}
+FORMATO (APENAS JSON):
+{"category":"CATEGORIA","confidence":0.95,"location":"ESTADO_OU_null"}
 
 EXEMPLOS:
+- "Câmara vota cassação de deputado" → {"category":"Política","confidence":0.98,"location":null}
+- "Dados sigilosos vazam de empresa" → {"category":"Tecnologia","confidence":0.92,"location":null}
+- "Conta de luz vai subir 5%" → {"category":"Economia","confidence":0.95,"location":null}
 - "Hamilton vence GP de Mônaco" → {"category":"Fórmula 1","confidence":0.98,"location":null}
-- "Bahia contrata atacante do Flamengo" → {"category":"Futebol","confidence":0.95,"location":null}
-- "Bitcoin atinge novo recorde histórico" → {"category":"Bitcoin","confidence":0.95,"location":null}
-- "Chuvas fortes causam alagamentos na Bahia" → {"category":"Clima","confidence":0.90,"location":"Bahia"}
-- "OpenAI lança nova versão do ChatGPT" → {"category":"Inteligência Artificial","confidence":0.95,"location":null}
+- "Flamengo contrata atacante" → {"category":"Futebol","confidence":0.98,"location":null}
+- "Bitcoin atinge recorde" → {"category":"Bitcoin","confidence":0.95,"location":null}
+- "ChatGPT ganha nova função" → {"category":"Inteligência Artificial","confidence":0.95,"location":null}
+- "Operação prende traficantes no RJ" → {"category":"Segurança","confidence":0.90,"location":"Rio de Janeiro"}
 
 Retorne APENAS o JSON, sem explicações.`;
 
