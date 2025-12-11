@@ -199,7 +199,13 @@ const RecommendationService = {
 
   /**
    * Calcula score para cada artigo
-   * Combina: categoria + frescor + similaridade (se disponível)
+   * Combina: similaridade (embedding) + categoria + frescor
+   * 
+   * PESOS OTIMIZADOS:
+   * - Com embedding: 50% similaridade, 25% categoria, 25% frescor
+   *   → Prioriza conteúdo similar (ex: clicou em Flamengo, vê mais Flamengo)
+   * - Sem embedding: 60% categoria, 40% frescor
+   * 
    * @param {Array} articles
    * @param {Object} userProfile
    */
@@ -212,7 +218,7 @@ const RecommendationService = {
       const categoryScore = preferenceMap.get(article.category_id) || 0.3;
 
       // Score de frescor (0 a 1)
-      const freshnessScore = this.calculateFreshness(article.published_at);
+      const freshnessScore = this.calculateFreshness(article.published_at || article.created_at);
 
       // Score de similaridade (se veio da busca por embedding)
       const similarityScore = article.similarity || 0;
@@ -220,11 +226,12 @@ const RecommendationService = {
       // Score final (pesos ajustáveis)
       let finalScore;
       if (hasEmbedding && similarityScore > 0) {
-        // Com embeddings: 40% categoria, 30% similaridade, 30% frescor
+        // Com embeddings: 50% similaridade, 25% categoria, 25% frescor
+        // → Prioriza conteúdo semanticamente similar ao histórico
         finalScore = 
-          (categoryScore * 0.4) +
-          (similarityScore * 0.3) +
-          (freshnessScore * 0.3);
+          (similarityScore * 0.50) +
+          (categoryScore * 0.25) +
+          (freshnessScore * 0.25);
       } else {
         // Sem embeddings: 60% categoria, 40% frescor
         finalScore = 
