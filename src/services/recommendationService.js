@@ -163,8 +163,9 @@ const RecommendationService = {
        LEFT JOIN categories c ON a.category_id = c.id
        WHERE a.category_id = ANY($1)
          AND a.id != ALL($2)
-         AND a.published_at > NOW() - INTERVAL '7 days'
-       ORDER BY a.published_at DESC NULLS LAST
+         AND (a.published_at > NOW() - INTERVAL '7 days' 
+              OR a.created_at > NOW() - INTERVAL '7 days')
+       ORDER BY COALESCE(a.published_at, a.created_at) DESC NULLS LAST
        LIMIT $3`,
       [categoryIds, excludeIds, limit]
     );
