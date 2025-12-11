@@ -45,57 +45,66 @@ const GeminiClassifierService = {
 
     const text = summary ? `${title}. ${summary}` : title;
 
-    // Prompt para classificação baseada em INTERESSES REAIS
+    // Prompt para classificação baseada em CONTEXTO e INTERESSES REAIS
     const prompt = `Você é um classificador de notícias brasileiras especializado.
-Classifique este artigo pensando em INTERESSES REAIS que pessoas seguem.
+Classifique este artigo analisando o CONTEXTO e pensando em INTERESSES REAIS.
 
 TEXTO: "${text}"
 
-PRINCÍPIO FUNDAMENTAL:
-Pense assim: "Que tipo de pessoa se interessaria por essa notícia? O que ela SEGUE?"
-- Alguém segue "Política", não "Votação no Congresso"
-- Alguém segue "Tecnologia", não "Vazamento de Dados Sigilosos"
-- Alguém segue "Economia", não "Energia Elétrica"
-- MAS alguém segue "Futebol" especificamente, não só "Esportes"
-- MAS alguém segue "Fórmula 1" especificamente, não só "Automobilismo"
-- MAS alguém segue "Bitcoin" especificamente, não só "Economia"
+REGRA DE OURO - ANALISE O CONTEXTO:
+O mesmo assunto pode ter categorias diferentes dependendo do contexto:
 
-CATEGORIAS ESPECÍFICAS (pessoas realmente seguem isso):
-- Esportes: Futebol, Fórmula 1, MMA/UFC, Tênis, Basquete, Vôlei, etc.
-- Tech: Inteligência Artificial, Games, Apple, Android, etc.
-- Finanças: Bitcoin, Criptomoedas, Bolsa de Valores, etc.
-- Entretenimento: Cinema, Séries, K-Pop, Música, etc.
+ENERGIA ELÉTRICA:
+- "Conta de luz sobe 5%" → Economia (é sobre preço/custo)
+- "SP sem luz após ventania" → Clima (consequência climática)
+- "Hackers atacam rede elétrica" → Tecnologia (ataque cibernético)
+- "Governo anuncia subsídio de energia" → Política (decisão governamental)
 
-CATEGORIAS AMPLAS (eventos específicos vão aqui):
-- Política: votações, escândalos, eleições, STF, Congresso
-- Economia: inflação, PIB, energia, combustíveis, preços
-- Tecnologia: vazamentos, hacks, lançamentos genéricos
-- Segurança: crimes, prisões, operações policiais
-- Saúde: doenças, vacinas, hospitais
-- Educação: escolas, universidades, vestibular
-- Meio Ambiente: desmatamento, clima, queimadas
+TRÂNSITO:
+- "Acidente mata 3 na BR-101" → Segurança (acidente/tragédia)
+- "Chuva alaga ruas e para trânsito" → Clima (consequência climática)
+- "Prefeitura anuncia novo pedágio" → Política (decisão governamental)
+- "Uber lança novo serviço" → Tecnologia (inovação tech)
+
+SEMPRE PERGUNTE: "Qual é a CAUSA ou TEMA PRINCIPAL da notícia?"
+
+CATEGORIAS ESPECÍFICAS (interesses reais que pessoas seguem):
+- Esportes: Futebol, Fórmula 1, MMA/UFC, Tênis, Basquete, Vôlei
+- Tech: Inteligência Artificial, Games, Apple, Android
+- Finanças: Bitcoin, Criptomoedas, Bolsa de Valores
+- Entretenimento: Cinema, Séries, K-Pop, Música
+
+CATEGORIAS AMPLAS (use baseado no CONTEXTO):
+- Política: decisões de governo, votações, eleições, STF, Congresso
+- Economia: preços, inflação, PIB, mercado, custos
+- Tecnologia: inovações, apps, hacks, lançamentos tech
+- Segurança: crimes, acidentes, prisões, violência
+- Saúde: doenças, vacinas, hospitais, epidemias
+- Clima: tempestades, secas, consequências climáticas
+- Meio Ambiente: desmatamento, queimadas, poluição
 
 REGRAS:
-1. Se é um INTERESSE REAL específico → use categoria específica
-2. Se é um EVENTO/SITUAÇÃO → use categoria ampla do tema
-3. TIMES DE FUTEBOL NÃO SÃO LOCALIZAÇÃO (Bahia, Fortaleza, São Paulo FC → location: null)
-4. LOCATION só para lugares geográficos explícitos
-   Estados válidos: ${BRAZILIAN_STATES.join(', ')}
+1. ANALISE O CONTEXTO - não classifique por palavras-chave
+2. Interesse específico real → categoria específica (Futebol, F1, Bitcoin)
+3. Evento/situação → categoria ampla baseada no CONTEXTO
+4. TIMES DE FUTEBOL NÃO SÃO LOCALIZAÇÃO
+5. Estados válidos: ${BRAZILIAN_STATES.join(', ')}
 
 FORMATO (APENAS JSON):
 {"category":"CATEGORIA","confidence":0.95,"location":"ESTADO_OU_null"}
 
-EXEMPLOS:
-- "Câmara vota cassação de deputado" → {"category":"Política","confidence":0.98,"location":null}
-- "Dados sigilosos vazam de empresa" → {"category":"Tecnologia","confidence":0.92,"location":null}
-- "Conta de luz vai subir 5%" → {"category":"Economia","confidence":0.95,"location":null}
-- "Hamilton vence GP de Mônaco" → {"category":"Fórmula 1","confidence":0.98,"location":null}
-- "Flamengo contrata atacante" → {"category":"Futebol","confidence":0.98,"location":null}
-- "Bitcoin atinge recorde" → {"category":"Bitcoin","confidence":0.95,"location":null}
-- "ChatGPT ganha nova função" → {"category":"Inteligência Artificial","confidence":0.95,"location":null}
-- "Operação prende traficantes no RJ" → {"category":"Segurança","confidence":0.90,"location":"Rio de Janeiro"}
+EXEMPLOS CONTEXTUAIS:
+- "Câmara vota cassação" → {"category":"Política","confidence":0.98,"location":null}
+- "Tarifa de luz sobe 10%" → {"category":"Economia","confidence":0.95,"location":null}
+- "Apagão em SP após temporal" → {"category":"Clima","confidence":0.95,"location":"São Paulo"}
+- "Hamilton vence GP" → {"category":"Fórmula 1","confidence":0.98,"location":null}
+- "Flamengo contrata" → {"category":"Futebol","confidence":0.98,"location":null}
+- "Bitcoin bate recorde" → {"category":"Bitcoin","confidence":0.95,"location":null}
+- "ChatGPT nova versão" → {"category":"Inteligência Artificial","confidence":0.95,"location":null}
+- "Acidente grave na rodovia" → {"category":"Segurança","confidence":0.90,"location":null}
+- "Temporal derruba árvores" → {"category":"Clima","confidence":0.95,"location":null}
 
-Retorne APENAS o JSON, sem explicações.`;
+Retorne APENAS o JSON.`;
 
     try {
       const response = await axios.post(

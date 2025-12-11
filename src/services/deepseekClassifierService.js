@@ -68,54 +68,55 @@ const DeepSeekClassifierService = {
 
     const text = summary ? `${title}. ${summary}` : title;
 
-    // Prompt baseado em INTERESSES REAIS
-    const prompt = `Você é um classificador de notícias brasileiras.
-Classifique pensando em INTERESSES que pessoas realmente seguem.
+    // Prompt baseado em CONTEXTO e INTERESSES REAIS
+    const prompt = `Classificador de notícias brasileiras. Analise o CONTEXTO.
 
 TEXTO: "${text}"
 
-PRINCÍPIO:
-Pense: "Que tipo de pessoa se interessaria? O que ela SEGUE?"
-- Alguém segue "Política", não "Votação no Congresso"
-- Alguém segue "Tecnologia", não "Vazamento de Dados"
-- Alguém segue "Economia", não "Energia Elétrica"
-- MAS alguém segue "Futebol" especificamente
-- MAS alguém segue "Fórmula 1" especificamente
-- MAS alguém segue "Bitcoin" especificamente
+REGRA DE OURO - O CONTEXTO DEFINE A CATEGORIA:
+O mesmo assunto muda de categoria conforme o contexto:
 
-CATEGORIAS ESPECÍFICAS (interesses reais):
-- Esportes: Futebol, Fórmula 1, MMA/UFC, Tênis, Basquete, etc.
-- Tech: Inteligência Artificial, Games, Apple, Android
-- Finanças: Bitcoin, Criptomoedas, Bolsa de Valores
-- Entretenimento: Cinema, Séries, K-Pop, Música
+ENERGIA:
+- "Conta de luz sobe" → Economia (preço)
+- "SP sem luz após temporal" → Clima (consequência climática)
+- "Hackers atacam rede" → Tecnologia (ataque)
 
-CATEGORIAS AMPLAS (eventos vão aqui):
-- Política: votações, escândalos, eleições, STF, Congresso
-- Economia: inflação, PIB, energia, combustíveis
-- Tecnologia: vazamentos, hacks, lançamentos gerais
-- Segurança: crimes, prisões, operações policiais
-- Saúde: doenças, vacinas, hospitais
-- Meio Ambiente: desmatamento, clima, queimadas
+TRÂNSITO:
+- "Acidente mata 3" → Segurança (tragédia)
+- "Chuva alaga e para trânsito" → Clima (consequência)
+- "Prefeitura anuncia pedágio" → Política (governo)
+
+PERGUNTE: "Qual a CAUSA PRINCIPAL?"
+
+ESPECÍFICAS (interesses reais):
+Futebol, Fórmula 1, MMA/UFC, Tênis, Basquete
+Inteligência Artificial, Games, Apple, Android
+Bitcoin, Criptomoedas, Bolsa de Valores
+Cinema, Séries, K-Pop, Música
+
+AMPLAS (baseado no contexto):
+- Política: governo, votações, eleições
+- Economia: preços, inflação, mercado
+- Tecnologia: inovações, hacks, apps
+- Segurança: crimes, acidentes, violência
+- Saúde: doenças, vacinas
+- Clima: tempestades, consequências climáticas
+- Meio Ambiente: desmatamento, poluição
 
 REGRAS:
-1. INTERESSE REAL específico → categoria específica
-2. EVENTO/SITUAÇÃO → categoria ampla
-3. Times de futebol NÃO são localização
-4. Estados válidos: ${BRAZILIAN_STATES.join(', ')}
+1. CONTEXTO define categoria, não palavras-chave
+2. Times de futebol NÃO são localização
+3. Estados: ${BRAZILIAN_STATES.join(', ')}
 
-FORMATO (APENAS JSON):
-{"category":"CATEGORIA","confidence":0.95,"location":"ESTADO_OU_null"}
+JSON: {"category":"CAT","confidence":0.95,"location":"ESTADO_OU_null"}
 
 EXEMPLOS:
-- "Câmara vota cassação" → {"category":"Política","confidence":0.98,"location":null}
-- "Dados vazam de empresa" → {"category":"Tecnologia","confidence":0.92,"location":null}
-- "Conta de luz sobe" → {"category":"Economia","confidence":0.95,"location":null}
+- "Tarifa de luz sobe" → {"category":"Economia","confidence":0.95,"location":null}
+- "Apagão após temporal" → {"category":"Clima","confidence":0.95,"location":null}
 - "Hamilton vence GP" → {"category":"Fórmula 1","confidence":0.98,"location":null}
-- "Flamengo contrata" → {"category":"Futebol","confidence":0.98,"location":null}
-- "Bitcoin bate recorde" → {"category":"Bitcoin","confidence":0.95,"location":null}
-- "ChatGPT nova função" → {"category":"Inteligência Artificial","confidence":0.95,"location":null}
+- "Acidente na rodovia" → {"category":"Segurança","confidence":0.90,"location":null}
 
-Retorne APENAS o JSON.`;
+Apenas JSON.`;
 
     try {
       const accessToken = await this.getAccessToken();
