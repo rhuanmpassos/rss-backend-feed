@@ -1,29 +1,44 @@
 /**
  * Interactions Controller
  * Recebe interações do app para Implicit Feedback
+ * 
+ * ATUALIZADO: Integrado com LearningService para
+ * aprendizado de padrões do usuário
  */
 
 import UserInteraction from '../models/UserInteraction.js';
 import UserCategoryPreference from '../models/UserCategoryPreference.js';
 import Article from '../models/Article.js';
+import LearningService from '../services/learningService.js';
+import UserSession from '../models/UserSession.js';
+import UserProfile from '../models/UserProfile.js';
+import PatternDetectionService from '../services/patternDetectionService.js';
 
 export const interactionsController = {
   /**
    * POST /api/interactions
    * Recebe batch de interações do app
-   * Body: { user_id: number, interactions: Array<Interaction> }
+   * Body: { 
+   *   user_id: number, 
+   *   session_id?: string,
+   *   device_type?: string,
+   *   interactions: Array<Interaction> 
+   * }
    * 
    * Interaction: {
    *   article_id: number,
    *   interaction_type: 'click' | 'view' | 'scroll_stop' | 'impression',
    *   duration?: number,  // ms (para 'view')
    *   position?: number,  // posição no feed
+   *   scroll_velocity?: number,  // velocidade do scroll
+   *   screen_position?: string,  // 'top' | 'middle' | 'bottom'
+   *   viewport_time?: number,  // tempo no viewport (ms)
    *   timestamp?: number  // quando ocorreu
    * }
    */
   async createBatch(req, res) {
     try {
-      const { user_id, interactions } = req.body;
+      const { user_id, session_id, device_type, interactions } = req.body;
 
       if (!user_id) {
         return res.status(400).json({ 
@@ -57,7 +72,10 @@ export const interactionsController = {
           articleId: interaction.article_id,
           interactionType: interaction.interaction_type,
           duration: interaction.duration || null,
-          position: interaction.position || null
+          position: interaction.position || null,
+          scroll_velocity: interaction.scroll_velocity || null,
+          screen_position: interaction.screen_position || null,
+          viewport_time: interaction.viewport_time || null
         });
       }
 
@@ -68,15 +86,32 @@ export const interactionsController = {
         });
       }
 
-      // Salva interações em batch
+      // Salva interações em batch (legado)
       const saved = await UserInteraction.createBatch(validInteractions);
 
-      // Atualiza preferências de categoria em background (não bloqueia resposta)
+      // Processa com LearningService em background (não bloqueia resposta)
       setImmediate(async () => {
         try {
+          // Usa LearningService para processar e aprender
+          await LearningService.processInteractionBatch(
+            user_id, 
+            validInteractions.map(i => ({
+              article_id: i.articleId,
+              interaction_type: i.interactionType,
+              duration: i.duration,
+              position: i.position,
+              scroll_velocity: i.scroll_velocity,
+              screen_position: i.screen_position,
+              viewport_time: i.viewport_time
+            })), 
+            session_id,
+            device_type
+          );
+          
+          // Também atualiza preferências (mantém compatibilidade)
           await updateCategoryPreferencesFromInteractions(user_id, validInteractions);
         } catch (error) {
-          console.error('Erro ao atualizar preferências:', error.message);
+          console.error('Erro ao processar aprendizado:', error.message);
         }
       });
 
@@ -194,6 +229,185 @@ export const interactionsController = {
           topCategories: byCategory,
           topArticles: interestScores
         }
+      });
+
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
+  // ========== SESSÕES ==========
+
+  /**
+   * POST /api/sessions
+   * Inicia nova sessão
+   * Body: { user_id, device_type?, entry_source? }
+   */
+  async startSession(req, res) {
+    try {
+      const { user_id, device_type, entry_source } = req.body;
+
+      if (!user_id) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'user_id é obrigatório' 
+        });
+      }
+
+      const session = await UserSession.create({
+        userId: user_id,
+        deviceType: device_type || null,
+        entrySource: entry_source || 'organic'
+      });
+
+      res.status(201).json({
+        success: true,
+        data: session
+      });
+
+    } catch (error) {
+      console.error('Erro ao criar sessão:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
+  /**
+   * PUT /api/sessions/:sessionId/end
+   * Finaliza sessão
+   */
+  async endSession(req, res) {
+    try {
+      const { sessionId } = req.params;
+
+      const session = await UserSession.end(sessionId);
+
+      if (!session) {
+        return res.status(404).json({
+          success: false,
+          error: 'Sessão não encontrada'
+        });
+      }
+
+      res.json({
+        success: true,
+        data: session
+      });
+
+    } catch (error) {
+      console.error('Erro ao finalizar sessão:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
+  /**
+   * GET /api/sessions/user/:userId
+   * Lista sessões de um usuário
+   */
+  async getUserSessions(req, res) {
+    try {
+      const { userId } = req.params;
+      const { limit = 50 } = req.query;
+
+      const [sessions, stats] = await Promise.all([
+        UserSession.findByUserId(parseInt(userId), parseInt(limit)),
+        UserSession.getStats(parseInt(userId))
+      ]);
+
+      res.json({
+        success: true,
+        data: { sessions, stats }
+      });
+
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
+  // ========== PERFIL ==========
+
+  /**
+   * GET /api/users/:userId/profile
+   * Retorna perfil do usuário
+   */
+  async getUserProfile(req, res) {
+    try {
+      const { userId } = req.params;
+
+      const profile = await UserProfile.getSimplifiedProfile(parseInt(userId));
+
+      res.json({
+        success: true,
+        data: profile
+      });
+
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
+  /**
+   * GET /api/users/:userId/profile/full
+   * Retorna perfil completo (admin/debug)
+   */
+  async getFullProfile(req, res) {
+    try {
+      const { userId } = req.params;
+
+      const profile = await UserProfile.findByUserId(parseInt(userId));
+
+      if (!profile) {
+        return res.json({
+          success: true,
+          data: null,
+          message: 'Usuário ainda não tem perfil'
+        });
+      }
+
+      res.json({
+        success: true,
+        data: profile
+      });
+
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
+  /**
+   * GET /api/users/:userId/patterns
+   * Retorna análise de padrões do usuário
+   */
+  async getUserPatterns(req, res) {
+    try {
+      const { userId } = req.params;
+
+      const analysis = await PatternDetectionService.getFullAnalysis(parseInt(userId));
+
+      res.json({
+        success: true,
+        data: analysis
+      });
+
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
+  /**
+   * POST /api/users/:userId/profile/recalculate
+   * Força recálculo do perfil
+   */
+  async recalculateProfile(req, res) {
+    try {
+      const { userId } = req.params;
+
+      const success = await LearningService.forceRecalculate(parseInt(userId));
+
+      res.json({
+        success,
+        message: success 
+          ? 'Perfil recalculado com sucesso' 
+          : 'Erro ao recalcular perfil'
       });
 
     } catch (error) {

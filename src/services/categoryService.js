@@ -215,6 +215,12 @@ async function normalizeAndGetCategory(categoryName) {
     throw new Error('Nome da categoria é obrigatório');
   }
 
+  // Rejeita valores inválidos como "null", "undefined", "none", etc.
+  const invalidValues = ['null', 'undefined', 'none', 'n/a', 'na', 'desconhecido', 'unknown', ''];
+  if (invalidValues.includes(categoryName.toLowerCase().trim())) {
+    throw new Error(`Categoria inválida: "${categoryName}"`);
+  }
+
   // 1. Verifica se há alias conhecido
   const aliasMatch = checkAlias(categoryName);
   const normalizedName = aliasMatch || categoryName.trim();

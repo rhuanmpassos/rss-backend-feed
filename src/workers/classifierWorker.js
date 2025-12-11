@@ -115,7 +115,15 @@ const ClassifierWorker = {
 
           if (classification) {
             // Normaliza e obtém/cria categoria no banco
-            const category = await CategoryService.normalizeAndGetCategory(classification.category);
+            let category;
+            try {
+              category = await CategoryService.normalizeAndGetCategory(classification.category);
+            } catch (categoryError) {
+              // Se a categoria for inválida (ex: "null"), usa "Diversos" como fallback
+              console.warn(`   ⚠️ ${categoryError.message} - usando "Diversos" como fallback`);
+              category = await CategoryService.normalizeAndGetCategory('Diversos');
+              classification.confidence = 0.5; // Reduz confiança para indicar fallback
+            }
             
             // Atualiza artigo com category_id
             const updatedArticle = await Article.updateCategory(
@@ -169,8 +177,17 @@ const ClassifierWorker = {
               site_name: updatedArticle.site_name || article.site_name
             });
           } else {
-            pending++;
-            console.log(`   ⏳ ${article.title.slice(0, 40)}... (pendente)`);
+            // Se não conseguiu classificar, usa "Diversos" como fallback
+            console.warn(`   ⚠️ Não foi possível classificar - usando "Diversos" como fallback`);
+            try {
+              const fallbackCategory = await CategoryService.normalizeAndGetCategory('Diversos');
+              await Article.updateCategory(article.id, fallbackCategory.id, 0.3);
+              processed++;
+              console.log(`   📦 ${article.title.slice(0, 40)}... → Diversos (fallback)`);
+            } catch (fallbackError) {
+              pending++;
+              console.log(`   ⏳ ${article.title.slice(0, 40)}... (pendente)`);
+            }
           }
 
         } catch (error) {

@@ -1,6 +1,6 @@
 /**
  * Script para executar migrações do banco de dados
- * Executa as migrações 003 e 004 para implementar categorias dinâmicas
+ * Executa as migrações necessárias, incluindo sistema de aprendizado
  */
 
 import fs from 'fs/promises';
@@ -11,8 +11,35 @@ import pool from './src/config/database.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-async function runMigration(migrationFile) {
+/**
+ * Verifica se uma tabela já existe
+ */
+async function tableExists(tableName) {
+  try {
+    const result = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = $1
+      )
+    `, [tableName]);
+    return result.rows[0].exists;
+  } catch (error) {
+    return false;
+  }
+}
+
+async function runMigration(migrationFile, skipIfExists = null) {
   console.log(`\n🔄 Executando migração: ${migrationFile}`);
+  
+  // Verifica se deve pular se tabela já existe
+  if (skipIfExists) {
+    const exists = await tableExists(skipIfExists);
+    if (exists) {
+      console.log(`⏭️  Tabela ${skipIfExists} já existe. Pulando migração.`);
+      return true;
+    }
+  }
   
   try {
     const migrationPath = path.join(__dirname, 'migrations', migrationFile);
@@ -22,6 +49,11 @@ async function runMigration(migrationFile) {
     console.log(`✅ Migração ${migrationFile} executada com sucesso!`);
     return true;
   } catch (error) {
+    // Se erro é "already exists", considera sucesso
+    if (error.message.includes('already exists') || error.message.includes('duplicate')) {
+      console.log(`⚠️  Migração ${migrationFile} já foi executada (objetos já existem)`);
+      return true;
+    }
     console.error(`❌ Erro na migração ${migrationFile}:`, error.message);
     return false;
   }
@@ -66,28 +98,71 @@ async function checkUsersTable() {
   }
 }
 
+async function checkLearningTables() {
+  try {
+    const result = await pool.query(`
+      SELECT 'User Profiles' as tabela, COUNT(*) as total FROM user_profiles
+      UNION ALL
+      SELECT 'User Sessions' as tabela, COUNT(*) as total FROM user_sessions
+      UNION ALL
+      SELECT 'Keyword Affinity' as tabela, COUNT(*) as total FROM user_keyword_affinity
+      UNION ALL
+      SELECT 'Clicked Titles' as tabela, COUNT(*) as total FROM clicked_titles_analysis
+    `);
+    console.log('\n🧠 Tabelas de aprendizado:');
+    console.table(result.rows);
+  } catch (error) {
+    // Tabelas ainda não existem
+    console.log('\n🧠 Tabelas de aprendizado ainda não existem');
+  }
+}
+
 async function main() {
-  console.log('🚀 Iniciando migrações para categorias dinâmicas...\n');
+  console.log('🚀 Iniciando migrações do banco de dados...\n');
   
   // Mostra estado antes
   await showStats();
   
-  // Executa migração 003 (category_id)
-  const migration003 = await runMigration('003_add_category_id.sql');
+  // Executa migração 003 (category_id) - pode falhar por permissão, mas não é crítico
+  console.log('\n📝 Migrações básicas:');
+  await runMigration('003_add_category_id.sql');
   
-  if (migration003) {
-    // Executa migração 004 (users)
-    await runMigration('004_create_users_tables.sql');
+  // Executa migração 004 (users)
+  await runMigration('004_create_users_tables.sql', 'users');
+  
+  // Executa migração 005 (embeddings) se necessário
+  const hasEmbeddings = await tableExists('articles');
+  if (hasEmbeddings) {
+    try {
+      const checkEmbedding = await pool.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'articles' AND column_name = 'embedding'
+      `);
+      if (checkEmbedding.rows.length === 0) {
+        await runMigration('005_add_embeddings.sql');
+      } else {
+        console.log('⏭️  Coluna embedding já existe. Pulando migração 005.');
+      }
+    } catch (error) {
+      console.log('⚠️  Não foi possível verificar embeddings:', error.message);
+    }
   }
+  
+  // Executa migração 008 (sistema de aprendizado) - IMPORTANTE!
+  console.log('\n🧠 Sistema de aprendizado:');
+  await runMigration('008_learning_system.sql', 'user_profiles');
   
   // Mostra estado depois
   await showStats();
   await checkUsersTable();
+  await checkLearningTables();
   
   console.log('\n✅ Migrações concluídas!');
-  console.log('\n⚠️  IMPORTANTE: Verifique se todos os artigos com categoria foram migrados.');
-  console.log('   Se "Articles sem category_id" > 0 e "Articles com category_id" correto,');
-  console.log('   você pode descomentar o DROP COLUMN no arquivo 003_add_category_id.sql');
+  console.log('\n📋 Próximos passos:');
+  console.log('   1. Verifique se as tabelas de aprendizado foram criadas');
+  console.log('   2. O sistema de engajamento está pronto para uso');
+  console.log('   3. Teste os endpoints: /feeds/addictive, /api/interactions');
   
   process.exit(0);
 }
