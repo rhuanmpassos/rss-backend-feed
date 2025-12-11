@@ -29,4 +29,7 @@ router.delete('/:id', usersController.delete);
 // GET /api/users/:id/preferences - Preferências do usuário
 router.get('/:id/preferences', usersController.getPreferences);
 
+// PUT /api/users/:id/preferences - Atualizar preferências (onboarding)
+router.put('/:id/preferences', usersController.updatePreferences);
+
 export default router;
