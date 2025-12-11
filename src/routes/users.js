@@ -26,4 +26,7 @@ router.put('/:id', usersController.update);
 // DELETE /api/users/:id - Deletar
 router.delete('/:id', usersController.delete);
 
+// GET /api/users/:id/preferences - Preferências do usuário
+router.get('/:id/preferences', usersController.getPreferences);
+
 export default router;

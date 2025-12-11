@@ -4,6 +4,7 @@
  */
 
 import User from '../models/User.js';
+import UserCategoryPreference from '../models/UserCategoryPreference.js';
 
 export const usersController = {
   /**
@@ -157,6 +158,20 @@ export const usersController = {
       }
 
       res.json({ success: true, message: 'Usuário deletado' });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
+  /**
+   * GET /api/users/:id/preferences
+   * Busca preferências de categoria do usuário
+   */
+  async getPreferences(req, res) {
+    try {
+      const { id } = req.params;
+      const preferences = await UserCategoryPreference.findByUserId(parseInt(id));
+      res.json({ success: true, data: preferences });
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
     }
