@@ -322,3 +322,4 @@ const DECAY_CONFIG_V2 = {
 5. [ ] Criar anti-clickbait score
 6. [ ] Adicionar serendipity real ao feed
 
+

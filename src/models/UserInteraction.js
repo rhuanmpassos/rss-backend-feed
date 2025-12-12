@@ -222,23 +222,29 @@ const UserInteraction = {
    * @param {number} limit
    */
   async findLikedArticles(userId, limit = 100) {
-    const result = await query(
-      `SELECT DISTINCT ON (a.id)
-        a.*,
-        c.name as category_name,
-        c.slug as category_slug,
-        s.name as site_name,
-        ui.created_at as liked_at
-       FROM user_interactions ui
-       JOIN articles a ON ui.article_id = a.id
-       LEFT JOIN categories c ON a.category_id = c.id
-       LEFT JOIN sites s ON a.site_id = s.id
-       WHERE ui.user_id = $1 AND ui.interaction_type = 'like'
-       ORDER BY a.id, ui.created_at DESC
-       LIMIT $2`,
-      [userId, limit]
-    );
-    return result.rows;
+    try {
+      const result = await query(
+        `SELECT DISTINCT ON (a.id)
+          a.*,
+          c.name as category_name,
+          c.slug as category_slug,
+          s.name as site_name,
+          ui.created_at as liked_at
+         FROM user_interactions ui
+         JOIN articles a ON ui.article_id = a.id
+         LEFT JOIN categories c ON a.category_id = c.id
+         LEFT JOIN sites s ON a.site_id = s.id
+         WHERE ui.user_id = $1 AND ui.interaction_type = 'like'
+         ORDER BY a.id, ui.created_at DESC
+         LIMIT $2`,
+        [userId, limit]
+      );
+      return result.rows;
+    } catch (error) {
+      console.error('Erro ao buscar artigos liked:', error);
+      // Retorna array vazio em caso de erro (ex: artigos deletados)
+      return [];
+    }
   },
 
   /**

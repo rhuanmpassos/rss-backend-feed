@@ -135,3 +135,4 @@
 7. ✅ Feedback negativo proporcional: 0.10 a 0.25
 8. ✅ Decay diferenciado: nível 1 lento, nível 3 rápido
 
+

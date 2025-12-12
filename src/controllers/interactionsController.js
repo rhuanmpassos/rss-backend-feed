@@ -144,7 +144,9 @@ export const interactionsController = {
             device_type
           );
           
-          // Também atualiza preferências (mantém compatibilidade)
+          // CORRIGIDO: Sempre atualiza preferências após batch (não apenas se houver clicks)
+          // Isso garante que preferências sejam recalculadas mesmo se batch tiver apenas views/impressions
+          // O PreferenceService recalcula baseado em TODAS as interações do usuário, não apenas do batch
           await updateCategoryPreferencesFromInteractions(user_id, validInteractions);
         } catch (error) {
           console.error('Erro ao processar aprendizado:', error.message);
@@ -196,9 +198,27 @@ export const interactionsController = {
         });
       }
 
+      // VALIDAÇÃO: Verifica se artigo existe
+      const articleId = parseInt(article_id);
+      if (isNaN(articleId)) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'article_id inválido' 
+        });
+      }
+
+      const articleExists = await Article.findById(articleId);
+      if (!articleExists) {
+        return res.status(400).json({ 
+          success: false, 
+          error: `Artigo ${articleId} não encontrado`,
+          code: 'ARTICLE_NOT_FOUND'
+        });
+      }
+
       const interaction = await UserInteraction.create({
         userId: user_id,
-        articleId: article_id,
+        articleId: articleId,
         interactionType: interaction_type,
         duration: duration || null,
         position: position || null

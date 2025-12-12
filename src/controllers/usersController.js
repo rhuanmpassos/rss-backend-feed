@@ -206,32 +206,38 @@ export const usersController = {
   /**
    * GET /api/users/:id/preferences
    * Busca preferências de categoria do usuário
-   * CORRIGIDO: Agora retorna scores NORMALIZADOS (soma = 100%)
+   * CORRIGIDO: Agora lê de user_hierarchical_preferences (tabela atualizada pelo PreferenceService)
+   * Os scores já vêm normalizados (soma = 100%) do PreferenceService
    */
   async getPreferences(req, res) {
     try {
       const { id } = req.params;
       const userId = parseInt(id);
       
-      // Busca preferências da tabela antiga
-      const rawPreferences = await UserCategoryPreference.findByUserId(userId);
+      // CORRIGIDO: Lê de user_hierarchical_preferences (tabela atualizada pelo PreferenceService)
+      // Esta tabela é atualizada automaticamente quando há clicks via PreferenceService.updateUserPreferences()
+      const preferences = await PreferenceService.getUserPreferences(userId, 20);
       
-      if (rawPreferences.length === 0) {
+      if (preferences.length === 0) {
         return res.json({ success: true, data: [] });
       }
       
-      // Normaliza os scores para que a soma seja 1.0 (100%)
-      const totalScore = rawPreferences.reduce((sum, p) => sum + (parseFloat(p.preference_score) || 0), 0);
-      
-      const normalizedPreferences = rawPreferences.map(pref => ({
-        ...pref,
-        preference_score: totalScore > 0 
-          ? parseFloat(pref.preference_score) / totalScore 
-          : 1 / rawPreferences.length, // Distribui igualmente se todos forem 0
-        raw_score: parseFloat(pref.preference_score) // Mantém o score original para debug
+      // Os scores já vêm normalizados do PreferenceService (soma = 100%)
+      // Apenas formata para o formato esperado pelo frontend
+      const formattedPreferences = preferences.map(pref => ({
+        id: pref.id,
+        user_id: pref.user_id,
+        category_id: pref.category_id,
+        category_name: pref.category_name,
+        category_slug: pref.category_slug,
+        preference_score: parseFloat(pref.preference_score) || 0,
+        interaction_count: pref.interaction_count || 0,
+        click_count: pref.click_count || 0,
+        impression_count: pref.impression_count || 0,
+        updated_at: pref.updated_at
       }));
       
-      res.json({ success: true, data: normalizedPreferences });
+      res.json({ success: true, data: formattedPreferences });
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
     }

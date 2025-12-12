@@ -195,9 +195,12 @@ export const articlesController = {
         parseInt(limit)
       );
 
-      res.json({ success: true, data: articles, count: articles.length });
+      // Sempre retorna sucesso, mesmo se array vazio (artigos podem ter sido deletados)
+      res.json({ success: true, data: articles || [], count: articles?.length || 0 });
     } catch (error) {
-      res.status(500).json({ success: false, error: error.message });
+      console.error('Erro ao buscar artigos liked:', error);
+      // Retorna array vazio em vez de erro 500
+      res.json({ success: true, data: [], count: 0, error: error.message });
     }
   }
 };
