@@ -185,6 +185,73 @@ const UserInteraction = {
       []
     );
     return result.rowCount;
+  },
+
+  /**
+   * Deleta uma interação específica
+   * @param {Object} data - { userId, articleId, interactionType }
+   */
+  async delete({ userId, articleId, interactionType }) {
+    const result = await query(
+      `DELETE FROM user_interactions 
+       WHERE user_id = $1 AND article_id = $2 AND interaction_type = $3
+       RETURNING id`,
+      [userId, articleId, interactionType]
+    );
+    return result.rowCount > 0;
+  },
+
+  /**
+   * Verifica se usuário deu like em um artigo
+   * @param {number} userId
+   * @param {number} articleId
+   */
+  async hasLiked(userId, articleId) {
+    const result = await query(
+      `SELECT 1 FROM user_interactions 
+       WHERE user_id = $1 AND article_id = $2 AND interaction_type = 'like'
+       LIMIT 1`,
+      [userId, articleId]
+    );
+    return result.rowCount > 0;
+  },
+
+  /**
+   * Busca artigos com like do usuário
+   * @param {number} userId
+   * @param {number} limit
+   */
+  async findLikedArticles(userId, limit = 100) {
+    const result = await query(
+      `SELECT DISTINCT ON (a.id)
+        a.*,
+        c.name as category_name,
+        c.slug as category_slug,
+        s.name as site_name,
+        ui.created_at as liked_at
+       FROM user_interactions ui
+       JOIN articles a ON ui.article_id = a.id
+       LEFT JOIN categories c ON a.category_id = c.id
+       LEFT JOIN sites s ON a.site_id = s.id
+       WHERE ui.user_id = $1 AND ui.interaction_type = 'like'
+       ORDER BY a.id, ui.created_at DESC
+       LIMIT $2`,
+      [userId, limit]
+    );
+    return result.rows;
+  },
+
+  /**
+   * Busca IDs de artigos com like do usuário (para marcar no feed)
+   * @param {number} userId
+   */
+  async getLikedArticleIds(userId) {
+    const result = await query(
+      `SELECT DISTINCT article_id FROM user_interactions 
+       WHERE user_id = $1 AND interaction_type = 'like'`,
+      [userId]
+    );
+    return result.rows.map(r => r.article_id);
   }
 };
 
