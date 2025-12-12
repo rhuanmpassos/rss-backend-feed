@@ -13,6 +13,7 @@ import LearningService from '../services/learningService.js';
 import UserSession from '../models/UserSession.js';
 import UserProfile from '../models/UserProfile.js';
 import PatternDetectionService from '../services/patternDetectionService.js';
+import PreferenceService from '../services/preferenceService.js';
 import User from '../models/User.js';
 
 export const interactionsController = {
@@ -179,14 +180,12 @@ export const interactionsController = {
         position: position || null
       });
 
-      // Se for click, atualiza preferências imediatamente
+      // Se for click, recalcula preferências normalizadas
       if (interaction_type === 'click') {
         setImmediate(async () => {
           try {
-            const article = await Article.findById(article_id);
-            if (article && article.category_id) {
-              await UserCategoryPreference.incrementScore(user_id, article.category_id, 0.1);
-            }
+            // Usa PreferenceService para recalcular scores normalizados
+            await PreferenceService.updateUserPreferences(user_id);
           } catch (error) {
             console.error('Erro ao atualizar preferência:', error.message);
           }
@@ -483,44 +482,20 @@ export const interactionsController = {
  * @param {number} userId
  * @param {Array} interactions
  */
+/**
+ * Atualiza preferências de categoria baseado em interações
+ * CORRIGIDO: Agora usa PreferenceService para scores normalizados (soma = 100%)
+ * @param {number} userId
+ * @param {Array} interactions - Não usado mais, mantido para compatibilidade
+ */
 async function updateCategoryPreferencesFromInteractions(userId, interactions) {
-  // Agrupa por categoria
-  const categoryScores = new Map();
-
-  for (const interaction of interactions) {
-    // Busca categoria do artigo
-    const article = await Article.findById(interaction.articleId);
-    if (!article || !article.category_id) continue;
-
-    const categoryId = article.category_id;
-    const currentScore = categoryScores.get(categoryId) || 0;
-
-    // Calcula score baseado no tipo de interação
-    let score = 0;
-    switch (interaction.interactionType) {
-      case 'click':
-        score = 1.0;
-        break;
-      case 'view':
-        // Quanto mais tempo, maior o interesse (max 0.8)
-        score = Math.min((interaction.duration || 0) / 10000, 0.8);
-        break;
-      case 'scroll_stop':
-        score = 0.3;
-        break;
-      case 'impression':
-        score = 0.05;
-        break;
-    }
-
-    categoryScores.set(categoryId, currentScore + score);
-  }
-
-  // Atualiza preferências
-  for (const [categoryId, score] of categoryScores) {
-    // Incrementa score proporcionalmente
-    const increment = Math.min(score * 0.05, 0.2); // Max 0.2 por batch
-    await UserCategoryPreference.incrementScore(userId, categoryId, increment);
+  // Usa PreferenceService para recalcular scores normalizados
+  // Isso considera TODAS as interações do usuário, não apenas as do batch atual
+  // E normaliza para que a soma seja 100%
+  try {
+    await PreferenceService.updateUserPreferences(userId);
+  } catch (error) {
+    console.error(`Erro ao atualizar preferências do usuário ${userId}:`, error.message);
   }
 }
 

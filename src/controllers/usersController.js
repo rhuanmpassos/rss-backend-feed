@@ -5,6 +5,7 @@
 
 import User from '../models/User.js';
 import UserCategoryPreference from '../models/UserCategoryPreference.js';
+import PreferenceService from '../services/preferenceService.js';
 
 export const usersController = {
   /**
@@ -205,12 +206,32 @@ export const usersController = {
   /**
    * GET /api/users/:id/preferences
    * Busca preferências de categoria do usuário
+   * CORRIGIDO: Agora retorna scores NORMALIZADOS (soma = 100%)
    */
   async getPreferences(req, res) {
     try {
       const { id } = req.params;
-      const preferences = await UserCategoryPreference.findByUserId(parseInt(id));
-      res.json({ success: true, data: preferences });
+      const userId = parseInt(id);
+      
+      // Busca preferências da tabela antiga
+      const rawPreferences = await UserCategoryPreference.findByUserId(userId);
+      
+      if (rawPreferences.length === 0) {
+        return res.json({ success: true, data: [] });
+      }
+      
+      // Normaliza os scores para que a soma seja 1.0 (100%)
+      const totalScore = rawPreferences.reduce((sum, p) => sum + (parseFloat(p.preference_score) || 0), 0);
+      
+      const normalizedPreferences = rawPreferences.map(pref => ({
+        ...pref,
+        preference_score: totalScore > 0 
+          ? parseFloat(pref.preference_score) / totalScore 
+          : 1 / rawPreferences.length, // Distribui igualmente se todos forem 0
+        raw_score: parseFloat(pref.preference_score) // Mantém o score original para debug
+      }));
+      
+      res.json({ success: true, data: normalizedPreferences });
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
     }
