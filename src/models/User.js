@@ -8,10 +8,29 @@ import { query } from '../config/database.js';
 const User = {
   /**
    * Cria um novo usuário
-   * @param {Object} data - { email, name }
+   * @param {Object} data - { email, name, password_hash? }
    * @returns {Promise<{id: number, email: string, name: string}>}
    */
-  async create({ email, name }) {
+  async create({ email, name, password_hash = null }) {
+    try {
+      const result = await query(
+        `INSERT INTO users (email, name, password_hash)
+         VALUES ($1, $2, $3)
+         RETURNING *`,
+        [email, name, password_hash]
+      );
+      return result.rows[0];
+    } catch (error) {
+      console.error('Erro ao criar usuário:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Cria ou atualiza usuário (upsert) - para compatibilidade
+   * @param {Object} data - { email, name }
+   */
+  async upsert({ email, name }) {
     try {
       const result = await query(
         `INSERT INTO users (email, name)
@@ -22,7 +41,7 @@ const User = {
       );
       return result.rows[0];
     } catch (error) {
-      console.error('Erro ao criar usuário:', error);
+      console.error('Erro ao criar/atualizar usuário:', error);
       throw error;
     }
   },
@@ -83,6 +102,19 @@ const User = {
     const result = await query(
       'DELETE FROM users WHERE id = $1 RETURNING id',
       [id]
+    );
+    return result.rowCount > 0;
+  },
+
+  /**
+   * Atualiza senha do usuário
+   * @param {number} id
+   * @param {string} passwordHash
+   */
+  async updatePassword(id, passwordHash) {
+    const result = await query(
+      `UPDATE users SET password_hash = $1 WHERE id = $2 RETURNING id`,
+      [passwordHash, id]
     );
     return result.rowCount > 0;
   }

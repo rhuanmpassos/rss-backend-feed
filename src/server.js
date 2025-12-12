@@ -14,6 +14,7 @@ import adminRoutes from './routes/admin.js';
 import eventsRoutes from './routes/events.js';
 import interactionsRoutes from './routes/interactions.js';
 import usersRoutes from './routes/users.js';
+import authRoutes from './routes/auth.js';
 import Scheduler from './scheduler/jobs.js';
 
 dotenv.config();
@@ -38,6 +39,7 @@ app.get('/health', (req, res) => {
 });
 
 // API Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/sites', sitesRoutes);
 app.use('/api/articles', articlesRoutes);
 app.use('/api/categories', categoriesRoutes);

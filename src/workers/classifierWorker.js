@@ -185,8 +185,8 @@ const ClassifierWorker = {
               processed++;
               console.log(`   📦 ${article.title.slice(0, 40)}... → Diversos (fallback)`);
             } catch (fallbackError) {
-              pending++;
-              console.log(`   ⏳ ${article.title.slice(0, 40)}... (pendente)`);
+            pending++;
+            console.log(`   ⏳ ${article.title.slice(0, 40)}... (pendente)`);
             }
           }
 

@@ -153,6 +153,24 @@ async function main() {
   console.log('\n🧠 Sistema de aprendizado:');
   await runMigration('008_learning_system.sql', 'user_profiles');
   
+  // Executa migração 009 (autenticação JWT)
+  console.log('\n🔐 Autenticação JWT:');
+  try {
+    const checkPasswordHash = await pool.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'users' AND column_name = 'password_hash'
+    `);
+    if (checkPasswordHash.rows.length === 0) {
+      await runMigration('009_add_password_hash.sql');
+    } else {
+      console.log('⏭️  Coluna password_hash já existe. Pulando migração 009.');
+    }
+  } catch (error) {
+    console.log('⚠️  Erro ao verificar password_hash:', error.message);
+    await runMigration('009_add_password_hash.sql');
+  }
+  
   // Mostra estado depois
   await showStats();
   await checkUsersTable();
