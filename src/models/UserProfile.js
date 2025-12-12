@@ -105,11 +105,19 @@ const UserProfile = {
   async getSimplifiedProfile(userId) {
     const profile = await this.findByUserId(userId);
     
+    const daysActive = profile?.first_interaction_at 
+      ? Math.floor((Date.now() - new Date(profile.first_interaction_at)) / (1000 * 60 * 60 * 24))
+      : 0;
+    
     if (!profile) {
       return {
         isNew: true,
         hasPreferences: false,
         hasEmbedding: false,
+        // Campos para compatibilidade com frontend
+        total_clicks: 0,
+        total_sessions: 0,
+        total_days_active: 0,
         features: {
           triggersEnabled: false,
           patternsEnabled: false,
@@ -123,6 +131,10 @@ const UserProfile = {
       isNew: false,
       hasPreferences: true,
       hasEmbedding: !!profile.profile_embedding,
+      // Campos para compatibilidade com frontend
+      total_clicks: profile.total_clicks || 0,
+      total_sessions: profile.total_sessions || 0,
+      total_days_active: daysActive,
       features: {
         triggersEnabled: profile.triggers_enabled,
         patternsEnabled: profile.patterns_enabled,
@@ -132,12 +144,11 @@ const UserProfile = {
       temporalPatterns: profile.temporal_patterns || {},
       engagementTriggers: profile.engagement_triggers || {},
       contentPreferences: profile.content_preferences || {},
+      // Stats aninhados mantidos para compatibilidade com outros consumidores
       stats: {
-        totalClicks: profile.total_clicks,
-        totalSessions: profile.total_sessions,
-        daysActive: profile.first_interaction_at 
-          ? Math.floor((Date.now() - new Date(profile.first_interaction_at)) / (1000 * 60 * 60 * 24))
-          : 0
+        totalClicks: profile.total_clicks || 0,
+        totalSessions: profile.total_sessions || 0,
+        daysActive
       }
     };
   },
