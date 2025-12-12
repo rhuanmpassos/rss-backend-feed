@@ -407,6 +407,7 @@ export const interactionsController = {
   /**
    * GET /api/users/:userId/patterns
    * Retorna análise de padrões do usuário
+   * Formata dados para o frontend
    */
   async getUserPatterns(req, res) {
     try {
@@ -414,9 +415,39 @@ export const interactionsController = {
 
       const analysis = await PatternDetectionService.getFullAnalysis(parseInt(userId));
 
+      // Calcula CTR do usuário
+      const ctrResult = await UserInteraction.countByType(parseInt(userId));
+      const impressions = ctrResult.find(r => r.interaction_type === 'impression')?.count || 0;
+      const clicks = ctrResult.find(r => r.interaction_type === 'click')?.count || 0;
+      const ctr = impressions > 0 ? clicks / impressions : 0;
+
+      // Formata para o frontend
+      const formattedData = {
+        // Dados originais (para debug/admin)
+        raw: analysis,
+        
+        // Formato esperado pelo frontend
+        temporal: {
+          most_active_hour: analysis.bestNotificationTime?.bestHours?.[0] || null,
+          best_hours: analysis.bestNotificationTime?.bestHours || [],
+          top_days: analysis.weekdayPattern?.topDays?.map(d => d.dayName) || []
+        },
+        content: {
+          preferred_categories: analysis.emergingInterests?.emerging?.map(e => e.categoryName) || [],
+          emerging_interests: analysis.emergingInterests?.emerging || []
+        },
+        engagement: {
+          click_through_rate: parseFloat(ctr.toFixed(4)),
+          trend: analysis.engagementTrend?.trend || 'unknown',
+          trend_change: analysis.engagementTrend?.change || 0,
+          user_type: analysis.userPattern?.type || 'new',
+          user_description: analysis.userPattern?.description || ''
+        }
+      };
+
       res.json({
         success: true,
-        data: analysis
+        data: formattedData
       });
 
     } catch (error) {
