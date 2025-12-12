@@ -47,7 +47,7 @@ const Article = {
    * Busca artigos com filtros
    * @param {Object} options - { siteId, categoryId, categorySlug, limit, offset }
    */
-  async findAll({ siteId, categoryId, categorySlug, limit = 50, offset = 0 } = {}) {
+  async findAll({ siteId, categoryId, categoryIds, categorySlug, limit = 50, offset = 0 } = {}) {
     let sql = `
       SELECT a.*, 
              s.name as site_name, 
@@ -69,7 +69,13 @@ const Article = {
       paramCount++;
     }
 
-    if (categoryId) {
+    // CORRIGIDO: Suporta array de categoryIds (para feed cronológico com múltiplas categorias)
+    if (categoryIds && Array.isArray(categoryIds) && categoryIds.length > 0) {
+      sql += ` AND a.category_id = ANY($${paramCount})`;
+      params.push(categoryIds);
+      paramCount++;
+    } else if (categoryId) {
+      // Mantém compatibilidade com categoryId singular
       sql += ` AND a.category_id = $${paramCount}`;
       params.push(categoryId);
       paramCount++;
@@ -122,8 +128,8 @@ const Article = {
    */
   async findById(id) {
     const result = await query(
-      `SELECT a.*,
-              s.name as site_name,
+      `SELECT a.*, 
+              s.name as site_name, 
               s.url as site_url,
               c.id as category_id,
               c.name as category_name,

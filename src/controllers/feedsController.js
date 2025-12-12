@@ -12,20 +12,47 @@ import EngagementFeedService from '../services/engagementFeedService.js';
 import PredictionService from '../services/predictionService.js';
 import PreferenceService from '../services/preferenceService.js';
 import Article from '../models/Article.js';
+import UserCategoryPreference from '../models/UserCategoryPreference.js';
 
 export const feedsController = {
   /**
    * GET /feeds/chronological
    * GET /feeds/chronological.json
-   * Feed cronológico (todos os artigos em ordem de publicação)
-   * Query: limit, offset, categorySlug
+   * Feed cronológico - apenas categorias escolhidas pelo usuário no onboarding
+   * Query: user_id (obrigatório), limit, offset
    */
   async getChronologicalFeed(req, res) {
     try {
-      const { limit = 50, offset = 0, categorySlug } = req.query;
+      const { user_id, limit = 50, offset = 0 } = req.query;
 
+      if (!user_id) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'user_id é obrigatório para feed cronológico' 
+        });
+      }
+
+      // Busca categorias escolhidas pelo usuário no onboarding
+      // Usa user_category_preferences (tabela de preferências iniciais do onboarding)
+      const userCategories = await UserCategoryPreference.findByUserId(parseInt(user_id));
+
+      if (!userCategories || userCategories.length === 0) {
+        // Usuário sem preferências - retorna array vazio
+        return res.json({ 
+          success: true, 
+          data: [],
+          count: 0,
+          feed_type: 'chronological',
+          message: 'Usuário ainda não selecionou categorias no onboarding'
+        });
+      }
+
+      // Extrai IDs das categorias escolhidas
+      const categoryIds = userCategories.map(c => c.category_id);
+
+      // Busca artigos apenas dessas categorias, ordenados por data de publicação
       const articles = await Article.findAll({
-        categorySlug,
+        categoryIds: categoryIds, // Passa array de IDs
         limit: parseInt(limit),
         offset: parseInt(offset)
       });
@@ -34,7 +61,8 @@ export const feedsController = {
         success: true, 
         data: articles,
         count: articles.length,
-        feed_type: 'chronological'
+        feed_type: 'chronological',
+        user_categories: userCategories.map(c => c.category_slug)
       });
 
     } catch (error) {
