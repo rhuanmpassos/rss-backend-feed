@@ -233,3 +233,4 @@ SET
 FROM categories c
 WHERE a.category_id = c.id
   AND a.category_path IS NULL;
+

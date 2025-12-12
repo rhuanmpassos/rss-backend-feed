@@ -127,3 +127,4 @@ COMMENT ON COLUMN categories.iptc_code IS 'Código IPTC Media Topics (ex: 150000
 COMMENT ON COLUMN categories.path IS 'Caminho slug completo (ex: esporte/automobilismo/formula-1)';
 COMMENT ON TABLE article_categories IS 'Relacionamento N:N entre artigos e categorias (suporta multi-label)';
 COMMENT ON TABLE user_hierarchical_preferences IS 'Preferências do usuário por categoria em qualquer nível da hierarquia';
+

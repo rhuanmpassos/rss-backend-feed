@@ -2,81 +2,327 @@
  * Engagement Feed Service
  * Gera feed otimizado para engajamento máximo
  * 
+ * ATUALIZADO: Agora usa sistema de scores hierárquicos IPTC
+ * 
  * Estratégia:
  * 1. Breaking news no topo (urgência)
- * 2. Artigos personalizados (relevância)
- * 3. Wildcards intercalados (surpresa/descoberta)
+ * 2. Artigos personalizados com scores relativos (relevância)
+ * 3. Exploration (20%) - descoberta de novos interesses
  * 4. Shuffle parcial (imprevisibilidade)
  * 
- * Funciona desde o primeiro usuário:
- * - Breaking: baseado em horário
- * - Wildcards: baseado em categorias
- * - Personalização: melhora com uso
+ * Melhorias científicas:
+ * - Scores normalizados (softmax) - somam 100%
+ * - Decay temporal - interesses antigos perdem peso
+ * - Feedback negativo implícito - CTR baixo = penalidade
+ * - Hierarquia IPTC - exploration em subcategorias irmãs
  */
 
 import { query } from '../config/database.js';
-import RecommendationService from './recommendationService.js';
+import PreferenceService from './preferenceService.js';
 import PredictionService from './predictionService.js';
 import UserProfile from '../models/UserProfile.js';
 
-// Configuração padrão
+// Configuração padrão - ATUALIZADA com exploration/exploitation
 const DEFAULT_CONFIG = {
-  WILDCARD_PERCENTAGE: 0.12,
+  EXPLOITATION_RATIO: 0.80,      // 80% baseado em preferências
+  EXPLORATION_RATIO: 0.20,       // 20% descoberta
   BREAKING_TOP_POSITIONS: 2,
   SHUFFLE_START: 5,
-  SHUFFLE_END: 20
+  SHUFFLE_END: 20,
+  MAX_CONSECUTIVE_SAME_CATEGORY: 3  // Diversificação
 };
 
 const EngagementFeedService = {
   /**
    * Gera feed otimizado para engajamento
+   * ATUALIZADO: Usa scores hierárquicos IPTC com exploration/exploitation
+   * 
    * @param {number} userId
    * @param {Object} options - { limit, offset }
    */
   async getAddictiveFeed(userId, { limit = 50, offset = 0 } = {}) {
-    console.log(`\n🎰 Gerando feed viciante para usuário ${userId}...`);
+    console.log(`\n🎰 Gerando feed For You para usuário ${userId}...`);
 
     const config = await this.getConfig();
-    const profile = await UserProfile.getSimplifiedProfile(userId);
 
-    // 1. Busca componentes do feed
-    const [breakingNews, personalizedArticles, wildcards] = await Promise.all([
+    // Calcula quantos artigos de cada tipo
+    const exploitationCount = Math.floor(limit * config.EXPLOITATION_RATIO);
+    const explorationCount = limit - exploitationCount;
+
+    // 1. Busca componentes do feed em paralelo
+    const [breakingNews, exploitationArticles, explorationArticles] = await Promise.all([
       this.getBreakingNews(config.BREAKING_TOP_POSITIONS + 3),
-      RecommendationService.getForYouFeed(userId, limit * 2),
-      this.getWildcards(userId, Math.ceil(limit * config.WILDCARD_PERCENTAGE))
+      this.getExploitationArticles(userId, exploitationCount + 10), // Extra para diversificação
+      this.getExplorationArticles(userId, explorationCount + 5)
     ]);
 
     console.log(`   📰 Breaking: ${breakingNews.length}`);
-    console.log(`   ✨ Personalizados: ${personalizedArticles.length}`);
-    console.log(`   💡 Wildcards: ${wildcards.length}`);
+    console.log(`   ✨ Exploitation (preferências): ${exploitationArticles.length}`);
+    console.log(`   🔍 Exploration (descoberta): ${explorationArticles.length}`);
 
-    // 2. Monta feed intercalado
-    let feed = this.assembleFeed({
+    // 2. Monta feed com diversificação
+    let feed = this.assembleFeedWithDiversity({
       breaking: breakingNews,
-      personalized: personalizedArticles,
-      wildcards: wildcards,
+      exploitation: exploitationArticles,
+      exploration: explorationArticles,
       config,
       limit: limit + offset
     });
 
-    // 3. Aplica predição se disponível
-    if (profile.features?.predictionEnabled) {
+    // 3. Aplica predição de clique para ranking final
+    try {
       console.log(`   🎯 Aplicando predição de clique...`);
       feed = await PredictionService.rankArticlesByPrediction(userId, feed);
+    } catch (e) {
+      console.warn(`   ⚠️ Predição não aplicada: ${e.message}`);
     }
 
     // 4. Aplica shuffle parcial (cria imprevisibilidade)
     feed = this.partialShuffle(feed, config.SHUFFLE_START, config.SHUFFLE_END);
 
-    // 5. Adiciona metadados de exibição
+    // 5. Adiciona metadados de exibição e explicação
     feed = this.addDisplayMetadata(feed);
 
     // 6. Aplica offset e limit
     const result = feed.slice(offset, offset + limit);
 
-    console.log(`   ✅ Feed gerado: ${result.length} artigos`);
+    console.log(`   ✅ Feed gerado: ${result.length} artigos (${exploitationCount} exploit + ${explorationCount} explore)`);
     
     return result;
+  },
+
+  /**
+   * Busca artigos baseados nas preferências do usuário (exploitation)
+   * Usa scores hierárquicos normalizados
+   */
+  async getExploitationArticles(userId, limit) {
+    // Busca preferências hierárquicas do usuário
+    const preferences = await PreferenceService.getUserPreferences(userId, 20);
+    
+    if (!preferences || preferences.length === 0) {
+      // Usuário novo - retorna artigos recentes populares
+      return this.getRecentPopularArticles(limit);
+    }
+
+    // Extrai IDs das categorias preferidas
+    const categoryIds = preferences.map(p => p.category_id).filter(Boolean);
+
+    if (categoryIds.length === 0) {
+      return this.getRecentPopularArticles(limit);
+    }
+
+    // Query com score ponderado pela preferência do usuário
+    const result = await query(`
+      WITH user_prefs AS (
+        SELECT category_id, preference_score
+        FROM user_hierarchical_preferences
+        WHERE user_id = $1
+      )
+      SELECT 
+        a.*,
+        s.name as site_name,
+        c.name as category_name,
+        c.slug as category_slug,
+        c.level as category_level,
+        c.path as category_path,
+        COALESCE(up.preference_score, 0.1) as user_preference,
+        'exploitation' as feed_type,
+        -- Score: preferência × confiança × recência
+        COALESCE(up.preference_score, 0.1) 
+        * COALESCE(a.category_confidence, 0.5)
+        * (1.0 / (1.0 + EXTRACT(HOUR FROM NOW() - a.published_at) / 24.0))
+        as relevance_score
+      FROM articles a
+      JOIN sites s ON a.site_id = s.id
+      LEFT JOIN categories c ON a.category_id = c.id
+      LEFT JOIN user_prefs up ON a.category_id = up.category_id
+      WHERE a.category_id = ANY($2::int[])
+        AND a.published_at > NOW() - INTERVAL '7 days'
+      ORDER BY relevance_score DESC, a.published_at DESC
+      LIMIT $3
+    `, [userId, categoryIds, limit]);
+
+    return result.rows.map(a => ({
+      ...a,
+      score: parseFloat(a.relevance_score) || 0.5,
+      explanation: `Baseado no seu interesse em ${a.category_name}`
+    }));
+  },
+
+  /**
+   * Busca artigos para descoberta (exploration)
+   * Usa subcategorias irmãs das preferências do usuário
+   */
+  async getExplorationArticles(userId, limit) {
+    // Busca preferências para encontrar subcategorias irmãs
+    const preferences = await PreferenceService.getUserPreferences(userId, 10);
+    
+    if (!preferences || preferences.length === 0) {
+      return this.getTrendingArticles(limit);
+    }
+
+    const preferredCategoryIds = preferences.map(p => p.category_id).filter(Boolean);
+
+    // Busca artigos de categorias IRMÃS (mesmo pai, diferente filho)
+    const result = await query(`
+      WITH user_categories AS (
+        SELECT DISTINCT c.parent_id
+        FROM categories c
+        WHERE c.id = ANY($1::int[]) AND c.parent_id IS NOT NULL
+      ),
+      sibling_categories AS (
+        SELECT c.id
+        FROM categories c
+        JOIN user_categories uc ON c.parent_id = uc.parent_id
+        WHERE c.id != ALL($1::int[])
+      )
+      SELECT 
+        a.*,
+        s.name as site_name,
+        c.name as category_name,
+        c.slug as category_slug,
+        c.level as category_level,
+        c.path as category_path,
+        'exploration' as feed_type,
+        0.3 as relevance_score
+      FROM articles a
+      JOIN sites s ON a.site_id = s.id
+      JOIN categories c ON a.category_id = c.id
+      JOIN sibling_categories sc ON a.category_id = sc.id
+      WHERE a.published_at > NOW() - INTERVAL '3 days'
+      ORDER BY a.published_at DESC
+      LIMIT $2
+    `, [preferredCategoryIds, limit]);
+
+    // Se não encontrou irmãs, busca trending
+    if (result.rows.length < limit / 2) {
+      const trending = await this.getTrendingArticles(limit - result.rows.length);
+      return [...result.rows, ...trending].map(a => ({
+        ...a,
+        score: 0.3,
+        is_exploration: true,
+        explanation: '🔍 Descobrindo novos interesses'
+      }));
+    }
+
+    return result.rows.map(a => ({
+      ...a,
+      score: 0.3,
+      is_exploration: true,
+      explanation: '🔍 Similar ao que você gosta'
+    }));
+  },
+
+  /**
+   * Artigos recentes populares (fallback para usuários novos)
+   */
+  async getRecentPopularArticles(limit) {
+    const result = await query(`
+      SELECT 
+        a.*,
+        s.name as site_name,
+        c.name as category_name,
+        c.slug as category_slug,
+        'recent' as feed_type,
+        0.5 as relevance_score
+      FROM articles a
+      JOIN sites s ON a.site_id = s.id
+      LEFT JOIN categories c ON a.category_id = c.id
+      WHERE a.published_at > NOW() - INTERVAL '24 hours'
+        AND a.category_id IS NOT NULL
+      ORDER BY a.published_at DESC
+      LIMIT $1
+    `, [limit]);
+
+    return result.rows.map(a => ({
+      ...a,
+      score: 0.5,
+      explanation: 'Notícia recente'
+    }));
+  },
+
+  /**
+   * Artigos em alta (trending)
+   */
+  async getTrendingArticles(limit) {
+    const result = await query(`
+      SELECT 
+        a.*,
+        s.name as site_name,
+        c.name as category_name,
+        c.slug as category_slug,
+        'trending' as feed_type,
+        COUNT(ui.id) as interaction_count
+      FROM articles a
+      JOIN sites s ON a.site_id = s.id
+      LEFT JOIN categories c ON a.category_id = c.id
+      LEFT JOIN user_interactions ui ON a.id = ui.article_id
+      WHERE a.published_at > NOW() - INTERVAL '24 hours'
+        AND a.category_id IS NOT NULL
+      GROUP BY a.id, s.name, c.name, c.slug
+      ORDER BY interaction_count DESC, a.published_at DESC
+      LIMIT $1
+    `, [limit]);
+
+    return result.rows.map(a => ({
+      ...a,
+      score: 0.4,
+      is_exploration: true,
+      explanation: '📈 Em alta agora'
+    }));
+  },
+
+  /**
+   * Monta feed com diversificação por categoria
+   */
+  assembleFeedWithDiversity({ breaking, exploitation, exploration, config, limit }) {
+    const feed = [];
+    const categoryCount = {};
+    const usedIds = new Set();
+
+    // Helper para adicionar com verificação
+    const addArticle = (article, maxConsecutive = config.MAX_CONSECUTIVE_SAME_CATEGORY) => {
+      if (usedIds.has(article.id)) return false;
+      
+      const catId = article.category_id || 'none';
+      const currentCount = categoryCount[catId] || 0;
+      
+      if (currentCount >= maxConsecutive) return false;
+      
+      usedIds.add(article.id);
+      categoryCount[catId] = currentCount + 1;
+      feed.push(article);
+      return true;
+    };
+
+    // 1. Breaking news primeiro (sem limite de categoria)
+    for (const article of breaking.slice(0, config.BREAKING_TOP_POSITIONS)) {
+      if (!usedIds.has(article.id)) {
+        usedIds.add(article.id);
+        feed.push(article);
+      }
+    }
+
+    // 2. Intercala exploitation (80%) com exploration (20%)
+    let expIdx = 0;
+    let explIdx = 0;
+    let exploitationTurn = 0;
+
+    while (feed.length < limit && (expIdx < exploitation.length || explIdx < exploration.length)) {
+      // A cada 5 artigos, 4 são exploitation e 1 é exploration
+      if (exploitationTurn < 4 && expIdx < exploitation.length) {
+        if (addArticle(exploitation[expIdx])) exploitationTurn++;
+        expIdx++;
+      } else if (explIdx < exploration.length) {
+        if (addArticle(exploration[explIdx])) exploitationTurn = 0;
+        explIdx++;
+      } else if (expIdx < exploitation.length) {
+        addArticle(exploitation[expIdx]);
+        expIdx++;
+      }
+    }
+
+    return feed;
   },
 
   /**
@@ -271,6 +517,7 @@ const EngagementFeedService = {
 
   /**
    * Adiciona metadados para exibição (badges, urgência, etc)
+   * ATUALIZADO: Suporta exploration e explanation
    */
   addDisplayMetadata(articles) {
     return articles.map((article, index) => {
@@ -283,10 +530,12 @@ const EngagementFeedService = {
           show_breaking_badge: article.is_breaking || urgency.level === 'breaking',
           show_live_badge: urgency.level === 'live',
           show_new_badge: urgency.level === 'new',
-          show_discovery_badge: article.is_wildcard,
+          show_discovery_badge: article.is_wildcard || article.is_exploration,
+          show_exploration_badge: article.is_exploration,
           urgency_badge: urgency.badge,
           urgency_color: urgency.color,
-          time_ago: this.getTimeAgo(article.published_at)
+          time_ago: this.getTimeAgo(article.published_at),
+          explanation: article.explanation || null
         }
       };
     });
@@ -359,6 +608,7 @@ const EngagementFeedService = {
 
   /**
    * Busca configuração do feed
+   * ATUALIZADO: Inclui configuração de exploration/exploitation
    */
   async getConfig() {
     try {
@@ -368,10 +618,8 @@ const EngagementFeedService = {
       
       if (result.rows[0]?.value) {
         return {
-          WILDCARD_PERCENTAGE: result.rows[0].value.WILDCARD_PERCENTAGE || DEFAULT_CONFIG.WILDCARD_PERCENTAGE,
-          BREAKING_TOP_POSITIONS: result.rows[0].value.BREAKING_TOP_POSITIONS || DEFAULT_CONFIG.BREAKING_TOP_POSITIONS,
-          SHUFFLE_START: result.rows[0].value.SHUFFLE_START || DEFAULT_CONFIG.SHUFFLE_START,
-          SHUFFLE_END: result.rows[0].value.SHUFFLE_END || DEFAULT_CONFIG.SHUFFLE_END
+          ...DEFAULT_CONFIG,
+          ...result.rows[0].value
         };
       }
     } catch (e) {

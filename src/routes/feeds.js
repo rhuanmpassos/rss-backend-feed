@@ -32,16 +32,7 @@ router.get('/breaking', feedsController.getBreakingNews);
 // Predição de clique
 router.get('/predict', feedsController.predictClick);
 
-// ==================== FEED INTELIGENTE (NOVO) ====================
-
-// 🧠 Feed Inteligente - Hierárquico com Exploration/Exploitation
-// - 80% exploitation (preferências hierárquicas)
-// - 20% exploration (descoberta de novos interesses)
-// - Scores relativos (softmax normalization)
-// - Decay temporal + feedback negativo
-router.get('/intelligent', feedsController.getIntelligentFeed);
-router.get('/intelligent.json', feedsController.getIntelligentFeed);
-router.get('/smart', feedsController.getIntelligentFeed); // Alias
+// ==================== PREFERÊNCIAS (DEBUG/ADMIN) ====================
 
 // Preferências hierárquicas do usuário (scores relativos)
 router.get('/preferences/:user_id', feedsController.getUserPreferences);

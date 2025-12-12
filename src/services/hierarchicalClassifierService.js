@@ -377,3 +377,4 @@ Retorne APENAS o JSON.`;
 
 export default HierarchicalClassifierService;
 export { IPTC_LEVEL1_CATEGORIES, IPTC_LEVEL2_HINTS, IPTC_LEVEL3_HINTS };
+

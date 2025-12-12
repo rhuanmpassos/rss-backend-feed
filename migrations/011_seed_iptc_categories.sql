@@ -206,3 +206,4 @@ ON CONFLICT (slug) DO UPDATE SET parent_id = EXCLUDED.parent_id, path = EXCLUDED
 -- Verificar estrutura criada
 -- SELECT level, COUNT(*) as total FROM categories GROUP BY level ORDER BY level;
 -- Esperado: Nível 1: 17, Nível 2: ~30, Nível 3: ~15
+

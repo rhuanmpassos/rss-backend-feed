@@ -10,7 +10,6 @@
 import FeedGeneratorService from '../services/feedGeneratorService.js';
 import EngagementFeedService from '../services/engagementFeedService.js';
 import PredictionService from '../services/predictionService.js';
-import IntelligentFeedService from '../services/intelligentFeedService.js';
 import PreferenceService from '../services/preferenceService.js';
 import Article from '../models/Article.js';
 
@@ -263,52 +262,7 @@ export const feedsController = {
     }
   },
 
-  // ==================== FEED INTELIGENTE (HIERÁRQUICO) ====================
-
-  /**
-   * GET /feeds/intelligent (ou /feeds/smart)
-   * Feed inteligente com scores hierárquicos e exploration/exploitation
-   * 
-   * Features:
-   * - 🎯 80% exploitation (baseado em preferências hierárquicas)
-   * - 🔍 20% exploration (descoberta de novos interesses)
-   * - 📊 Scores relativos (normalização softmax)
-   * - ⏰ Decay temporal (interesses antigos perdem peso)
-   * - 🚫 Feedback negativo implícito (CTR baixo = penalidade)
-   * 
-   * Query: user_id (obrigatório), limit, offset
-   */
-  async getIntelligentFeed(req, res) {
-    try {
-      const { user_id, limit = 50, offset = 0 } = req.query;
-
-      if (!user_id) {
-        return res.status(400).json({
-          success: false,
-          error: 'user_id é obrigatório'
-        });
-      }
-
-      const articles = await IntelligentFeedService.getPersonalizedFeed(
-        parseInt(user_id),
-        { limit: parseInt(limit), offset: parseInt(offset) }
-      );
-
-      res.json({
-        success: true,
-        data: articles,
-        count: articles.length,
-        feed_type: 'intelligent',
-        config: IntelligentFeedService.getConfig(),
-        offset: parseInt(offset),
-        has_more: articles.length === parseInt(limit)
-      });
-
-    } catch (error) {
-      console.error('Erro ao gerar feed inteligente:', error);
-      res.status(500).json({ success: false, error: error.message });
-    }
-  },
+  // ==================== PREFERÊNCIAS HIERÁRQUICAS ====================
 
   /**
    * GET /feeds/preferences/:user_id
