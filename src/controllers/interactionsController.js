@@ -13,6 +13,7 @@ import LearningService from '../services/learningService.js';
 import UserSession from '../models/UserSession.js';
 import UserProfile from '../models/UserProfile.js';
 import PatternDetectionService from '../services/patternDetectionService.js';
+import User from '../models/User.js';
 
 export const interactionsController = {
   /**
@@ -51,6 +52,16 @@ export const interactionsController = {
         return res.status(400).json({ 
           success: false, 
           error: 'interactions deve ser um array não vazio' 
+        });
+      }
+
+      // VALIDAÇÃO: Verifica se usuário existe antes de inserir
+      const userExists = await User.findById(user_id);
+      if (!userExists) {
+        return res.status(400).json({ 
+          success: false, 
+          error: `Usuário ${user_id} não encontrado. Certifique-se de que o usuário está registrado.`,
+          code: 'USER_NOT_FOUND'
         });
       }
 
@@ -147,6 +158,16 @@ export const interactionsController = {
         return res.status(400).json({ 
           success: false, 
           error: `interaction_type deve ser: ${validTypes.join(', ')}` 
+        });
+      }
+
+      // VALIDAÇÃO: Verifica se usuário existe
+      const userExists = await User.findById(user_id);
+      if (!userExists) {
+        return res.status(400).json({ 
+          success: false, 
+          error: `Usuário ${user_id} não encontrado.`,
+          code: 'USER_NOT_FOUND'
         });
       }
 
@@ -251,6 +272,16 @@ export const interactionsController = {
         return res.status(400).json({ 
           success: false, 
           error: 'user_id é obrigatório' 
+        });
+      }
+
+      // VALIDAÇÃO: Verifica se usuário existe
+      const userExists = await User.findById(user_id);
+      if (!userExists) {
+        return res.status(400).json({ 
+          success: false, 
+          error: `Usuário ${user_id} não encontrado. Certifique-se de que o usuário está registrado.`,
+          code: 'USER_NOT_FOUND'
         });
       }
 

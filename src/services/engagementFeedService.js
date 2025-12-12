@@ -152,6 +152,7 @@ const EngagementFeedService = {
   /**
    * Busca artigos para descoberta (exploration)
    * Usa subcategorias irmãs das preferências do usuário
+   * CORRIGIDO: Agora filtra categorias com feedback negativo (CTR baixo)
    */
   async getExplorationArticles(userId, limit) {
     // Busca preferências para encontrar subcategorias irmãs
@@ -164,6 +165,7 @@ const EngagementFeedService = {
     const preferredCategoryIds = preferences.map(p => p.category_id).filter(Boolean);
 
     // Busca artigos de categorias IRMÃS (mesmo pai, diferente filho)
+    // CORRIGIDO: Exclui categorias com CTR baixo (feedback negativo implícito)
     const result = await query(`
       WITH user_categories AS (
         SELECT DISTINCT c.parent_id
@@ -175,6 +177,14 @@ const EngagementFeedService = {
         FROM categories c
         JOIN user_categories uc ON c.parent_id = uc.parent_id
         WHERE c.id != ALL($1::int[])
+      ),
+      -- Categorias com feedback negativo (CTR < 5% com 10+ impressões)
+      negative_feedback_categories AS (
+        SELECT category_id 
+        FROM user_hierarchical_preferences
+        WHERE user_id = $3
+          AND impression_count >= 10
+          AND click_count::float / NULLIF(impression_count, 0) < 0.05
       )
       SELECT 
         a.*,
@@ -190,9 +200,11 @@ const EngagementFeedService = {
       JOIN categories c ON a.category_id = c.id
       JOIN sibling_categories sc ON a.category_id = sc.id
       WHERE a.published_at > NOW() - INTERVAL '3 days'
+        -- NOVO: Exclui categorias rejeitadas pelo usuário
+        AND a.category_id NOT IN (SELECT category_id FROM negative_feedback_categories)
       ORDER BY a.published_at DESC
       LIMIT $2
-    `, [preferredCategoryIds, limit]);
+    `, [preferredCategoryIds, limit, userId]);
 
     // Se não encontrou irmãs, busca trending
     if (result.rows.length < limit / 2) {

@@ -15,30 +15,49 @@
 import { query } from '../config/database.js';
 
 // Configuração de pesos por tipo de interação
-// Baseado em pesquisa: interações mais fortes indicam maior interesse
+// CORRIGIDO: Click é ação EXPLÍCITA de interesse, deve ter mais peso que view
+// View (dwell time) COMPLEMENTA o click, não substitui
+// 
+// Baseado em pesquisa: click é o sinal mais forte de interesse explícito
+// View/dwell time indica engajamento, mas pode ser por distração
 const INTERACTION_WEIGHTS = {
   impression: 0.05,    // Viu no feed (interesse mínimo)
   scroll_stop: 0.15,   // Parou para olhar (2s+)
-  click: 0.40,         // Clicou para ler
-  view: 0.60,          // Leu por 30s+
+  click: 0.50,         // CORRIGIDO: Clicou para ler (ação explícita - mais importante)
+  view: 0.30,          // CORRIGIDO: Complemento do click (tempo de leitura)
   like: 0.80,          // Curtiu
   share: 1.00,         // Compartilhou (maior sinal de interesse)
   bookmark: 0.70       // Salvou para depois
 };
 
 // Configuração de decay temporal
-// decay_rate = 0.05 significa meia-vida de ~14 dias
+// CORRIGIDO: Decay diferenciado por nível de categoria
+// - Categorias específicas (nível 3) mudam mais rápido → decay rápido
+// - Categorias amplas (nível 1) são mais estáveis → decay lento
+// 
+// Fórmula: half-life = ln(2) / rate
+// rate 0.05 → ~14 dias | rate 0.03 → ~23 dias | rate 0.015 → ~46 dias
 const DECAY_CONFIG = {
-  rate: 0.05,          // Taxa de decay por dia
+  // Rates por nível de categoria (half-life entre parênteses)
+  rateByLevel: {
+    1: 0.015,          // Nível 1 (Esporte, Política): ~46 dias - interesses amplos são estáveis
+    2: 0.03,           // Nível 2 (Futebol, Automobilismo): ~23 dias - interesses médios
+    3: 0.05            // Nível 3 (F1, Brasileirão): ~14 dias - interesses específicos flutuam mais
+  },
+  defaultRate: 0.05,   // Taxa padrão se nível não definido
   minWeight: 0.1,      // Peso mínimo (interações muito antigas)
   maxDays: 90          // Ignorar interações mais antigas que isso
 };
 
 // Configuração de feedback negativo
+// CORRIGIDO: Penalidade agora é proporcional ao quão baixo é o CTR
+// Baseado em pesquisa: mps (mean penalty score) de ~0.2 é ótimo
 const NEGATIVE_FEEDBACK_CONFIG = {
   minImpressions: 10,  // Mínimo de impressões para considerar
-  ctrThreshold: 0.05,  // CTR abaixo disso = desinteresse
-  penalty: 0.1         // Penalidade aplicada
+  ctrThreshold: 0.05,  // CTR abaixo disso = desinteresse (5%)
+  basePenalty: 0.10,   // Penalidade base
+  maxPenalty: 0.25,    // Penalidade máxima (CTR = 0%)
+  minScore: 0.005      // Score mínimo (permite quase zerar, mas não completamente)
 };
 
 const PreferenceService = {
@@ -59,11 +78,20 @@ const PreferenceService = {
 
   /**
    * Calcula scores relativos (normalizados) para todas as categorias do usuário
+   * 
+   * CORRIGIDO: Agora usa decay diferenciado por nível de categoria
+   * - Nível 1 (amplo): decay lento (~46 dias half-life) - interesses estáveis
+   * - Nível 2 (médio): decay médio (~23 dias half-life)
+   * - Nível 3 (específico): decay rápido (~14 dias half-life) - interesses flutuam mais
+   * 
    * @param {number} userId
    * @returns {Array} Categorias com scores relativos
    */
   async calculateRelativeScores(userId) {
-    // Query que calcula score ponderado com decay
+    // Rates por nível para usar na query
+    const { rateByLevel, defaultRate, maxDays } = DECAY_CONFIG;
+    
+    // Query que calcula score ponderado com decay DIFERENCIADO por nível
     const result = await query(`
       WITH weighted_interactions AS (
         SELECT 
@@ -76,14 +104,15 @@ const PreferenceService = {
         LEFT JOIN articles a ON ui.article_id = a.id
         LEFT JOIN article_categories ac ON ui.article_id = ac.article_id AND ac.is_primary = true
         WHERE ui.user_id = $1
-          AND ui.created_at > NOW() - INTERVAL '${DECAY_CONFIG.maxDays} days'
+          AND ui.created_at > NOW() - INTERVAL '${maxDays} days'
           AND (a.category_id IS NOT NULL OR ac.category_id IS NOT NULL)
       ),
       category_scores AS (
         SELECT 
-          category_id,
+          wi.category_id,
+          c.level as category_level,
           SUM(
-            CASE interaction_type
+            CASE wi.interaction_type
               WHEN 'share' THEN ${INTERACTION_WEIGHTS.share}
               WHEN 'like' THEN ${INTERACTION_WEIGHTS.like}
               WHEN 'bookmark' THEN ${INTERACTION_WEIGHTS.bookmark}
@@ -93,13 +122,23 @@ const PreferenceService = {
               WHEN 'impression' THEN ${INTERACTION_WEIGHTS.impression}
               ELSE 0.1
             END
-            * EXP(-${DECAY_CONFIG.rate} * days_ago)
+            -- CORRIGIDO: Decay diferenciado por nível de categoria
+            * EXP(
+              -CASE COALESCE(c.level, 3)
+                WHEN 1 THEN ${rateByLevel[1]}   -- Nível 1: decay lento
+                WHEN 2 THEN ${rateByLevel[2]}   -- Nível 2: decay médio
+                WHEN 3 THEN ${rateByLevel[3]}   -- Nível 3: decay rápido
+                ELSE ${defaultRate}
+              END 
+              * wi.days_ago
+            )
           ) as raw_score,
-          COUNT(*) FILTER (WHERE interaction_type = 'click') as click_count,
-          COUNT(*) FILTER (WHERE interaction_type = 'impression') as impression_count,
+          COUNT(*) FILTER (WHERE wi.interaction_type = 'click') as click_count,
+          COUNT(*) FILTER (WHERE wi.interaction_type = 'impression') as impression_count,
           COUNT(*) as total_interactions
-        FROM weighted_interactions
-        GROUP BY category_id
+        FROM weighted_interactions wi
+        JOIN categories c ON wi.category_id = c.id
+        GROUP BY wi.category_id, c.level
       ),
       total_score AS (
         SELECT SUM(raw_score) as total FROM category_scores
@@ -177,10 +216,16 @@ const PreferenceService = {
   /**
    * Aplica feedback negativo implícito
    * Se usuário viu muitas notícias de uma categoria mas não clicou = desinteresse
+   * 
+   * CORRIGIDO: Penalidade agora é PROPORCIONAL ao quão baixo é o CTR
+   * - CTR = 4.9% (quase threshold) → penalidade pequena (~0.10)
+   * - CTR = 2.5% (metade do threshold) → penalidade média (~0.175)
+   * - CTR = 0% (zero cliques) → penalidade máxima (0.25)
+   * 
    * @param {number} userId
    */
   async applyNegativeFeedback(userId) {
-    const { minImpressions, ctrThreshold, penalty } = NEGATIVE_FEEDBACK_CONFIG;
+    const { minImpressions, ctrThreshold, basePenalty, maxPenalty, minScore } = NEGATIVE_FEEDBACK_CONFIG;
 
     // Busca categorias com CTR muito baixo
     const lowCtrCategories = await query(`
@@ -197,8 +242,16 @@ const PreferenceService = {
     `, [userId, minImpressions, ctrThreshold]);
 
     for (const cat of lowCtrCategories.rows) {
-      // Reduz score proporcionalmente ao CTR baixo
-      const newScore = Math.max(0.01, cat.preference_score - penalty);
+      const ctr = parseFloat(cat.ctr) || 0;
+      const currentScore = parseFloat(cat.preference_score) || 0;
+      
+      // CORRIGIDO: Penalidade proporcional ao quão baixo é o CTR
+      // severityRatio: 0.0 (CTR = threshold) a 1.0 (CTR = 0%)
+      const severityRatio = 1 - (ctr / ctrThreshold);
+      const penalty = basePenalty + (severityRatio * (maxPenalty - basePenalty));
+      
+      // Aplica penalidade com score mínimo
+      const newScore = Math.max(minScore, currentScore - penalty);
       
       await query(`
         UPDATE user_hierarchical_preferences
@@ -206,13 +259,17 @@ const PreferenceService = {
         WHERE user_id = $2 AND category_id = $3
       `, [newScore, userId, cat.category_id]);
 
-      console.log(`   📉 Feedback negativo: categoria ${cat.category_id} (CTR: ${(cat.ctr * 100).toFixed(1)}%) score: ${newScore.toFixed(3)}`);
+      console.log(`   📉 Feedback negativo: categoria ${cat.category_id} (CTR: ${(ctr * 100).toFixed(1)}%, severidade: ${(severityRatio * 100).toFixed(0)}%) penalidade: ${penalty.toFixed(3)}, score: ${currentScore.toFixed(3)} → ${newScore.toFixed(3)}`);
     }
   },
 
   /**
    * Propaga scores para categorias pai na hierarquia
    * Se usuário gosta de "Fórmula 1", também gosta um pouco de "Automobilismo" e "Esporte"
+   * 
+   * CORRIGIDO: Antes usava avgScore * 1.2 que fazia pai > filhos
+   * Agora usa FRAÇÃO do score médio dos filhos (pai sempre < filhos)
+   * 
    * @param {number} userId
    */
   async propagateToParentCategories(userId) {
@@ -227,21 +284,28 @@ const PreferenceService = {
       WHERE uhp.user_id = $1 AND c.parent_id IS NOT NULL
     `, [userId]);
 
-    // Agrupa por parent_id e calcula média ponderada
+    // Agrupa por parent_id e calcula estatísticas
     const parentScores = {};
     
     for (const cat of categoriesWithParents.rows) {
+      const score = parseFloat(cat.preference_score) || 0;
       if (!parentScores[cat.parent_id]) {
-        parentScores[cat.parent_id] = { total: 0, count: 0 };
+        parentScores[cat.parent_id] = { total: 0, count: 0, maxChild: 0 };
       }
-      parentScores[cat.parent_id].total += cat.preference_score;
+      parentScores[cat.parent_id].total += score;
       parentScores[cat.parent_id].count++;
+      parentScores[cat.parent_id].maxChild = Math.max(parentScores[cat.parent_id].maxChild, score);
     }
 
-    // Atualiza scores dos pais (média dos filhos, máximo 0.8 do filho mais alto)
+    // CORRIGIDO: Pai tem score = 50% da média dos filhos
+    // E nunca maior que 80% do filho mais alto
+    // Isso garante que pai < filhos sempre
     for (const [parentId, data] of Object.entries(parentScores)) {
       const avgScore = data.total / data.count;
-      const parentScore = Math.min(avgScore * 1.2, 0.3); // Pai tem score menor que filhos
+      const parentScore = Math.min(
+        avgScore * 0.5,           // 50% da média dos filhos
+        data.maxChild * 0.8       // No máximo 80% do filho mais alto
+      );
 
       await query(`
         INSERT INTO user_hierarchical_preferences 

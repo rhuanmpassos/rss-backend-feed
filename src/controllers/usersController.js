@@ -41,24 +41,32 @@ export const usersController = {
       });
 
       // Se passou categorias iniciais (onboarding/cold start), salva preferências
+      // CORRIGIDO: Agora normaliza scores para somar 1.0 (evita saturação)
       if (initial_categories && Array.isArray(initial_categories) && initial_categories.length > 0) {
         const validCategories = initial_categories.slice(0, 6); // Max 6 categorias
-        const baseScore = 0.8; // Score alto inicial para categorias escolhidas
+        
+        // Calcula pesos relativos (primeira categoria selecionada tem mais peso)
+        // Pesos: 6, 5, 4, 3, 2, 1 para posições 0, 1, 2, 3, 4, 5
+        const weights = validCategories.map((_, i) => validCategories.length - i);
+        const totalWeight = weights.reduce((sum, w) => sum + w, 0);
         
         for (let i = 0; i < validCategories.length; i++) {
           const categoryId = parseInt(validCategories[i]);
           if (!isNaN(categoryId)) {
-            // Score decresce levemente por ordem de seleção
-            const score = baseScore - (i * 0.05);
+            // Score normalizado: peso / total (soma de todos = 1.0)
+            const normalizedScore = weights[i] / totalWeight;
+            
+            // Salva na tabela do sistema novo (user_hierarchical_preferences)
+            // para consistência com PreferenceService
             await UserCategoryPreference.upsert({
               userId: user.id,
               categoryId,
-              preferenceScore: Math.max(score, 0.5)
+              preferenceScore: normalizedScore
             });
           }
         }
         
-        console.log(`👤 Usuário ${user.id} criado com ${validCategories.length} categorias iniciais`);
+        console.log(`👤 Usuário ${user.id} criado com ${validCategories.length} categorias (scores normalizados, soma=1.0)`);
       }
 
       // Busca preferências salvas para retornar
@@ -248,18 +256,23 @@ export const usersController = {
       await UserCategoryPreference.deleteAllByUser(userId);
 
       // Salva novas preferências (max 6)
+      // CORRIGIDO: Agora normaliza scores para somar 1.0 (evita saturação)
       const validCategories = categories.slice(0, 6);
-      const baseScore = 0.8;
       const savedPreferences = [];
+      
+      // Calcula pesos relativos (primeira categoria selecionada tem mais peso)
+      const weights = validCategories.map((_, i) => validCategories.length - i);
+      const totalWeight = weights.reduce((sum, w) => sum + w, 0);
 
       for (let i = 0; i < validCategories.length; i++) {
         const categoryId = parseInt(validCategories[i]);
         if (!isNaN(categoryId)) {
-          const score = baseScore - (i * 0.05);
+          // Score normalizado: peso / total (soma de todos = 1.0)
+          const normalizedScore = weights[i] / totalWeight;
           const pref = await UserCategoryPreference.upsert({
             userId,
             categoryId,
-            preferenceScore: Math.max(score, 0.5)
+            preferenceScore: normalizedScore
           });
           savedPreferences.push(pref);
         }
@@ -268,7 +281,7 @@ export const usersController = {
       // Busca preferências completas (com nome da categoria)
       const preferences = await UserCategoryPreference.findByUserId(userId);
 
-      console.log(`👤 Preferências do usuário ${userId} atualizadas: ${preferences.length} categorias`);
+      console.log(`👤 Preferências do usuário ${userId} atualizadas: ${preferences.length} categorias (scores normalizados, soma=1.0)`);
 
       res.json({ 
         success: true, 

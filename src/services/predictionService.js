@@ -137,9 +137,11 @@ const PredictionService = {
     }
 
     // 4. PREFERÊNCIA DE CATEGORIA (15% do peso)
+    // CORRIGIDO: Usar user_hierarchical_preferences (sistema novo com normalização)
+    // Antes usava user_category_preferences que tinha saturação de scores
     if (article.category_id) {
       const categoryPref = await query(`
-        SELECT preference_score FROM user_category_preferences
+        SELECT preference_score FROM user_hierarchical_preferences
         WHERE user_id = $1 AND category_id = $2
       `, [userId, article.category_id]);
 

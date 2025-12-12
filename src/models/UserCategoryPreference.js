@@ -76,12 +76,31 @@ const UserCategoryPreference = {
   },
 
   /**
-   * Incrementa score de preferência (baseado em interação)
+   * @deprecated ESTE MÉTODO CAUSA SATURAÇÃO DE SCORES!
+   * 
+   * PROBLEMA: Usa LEAST(1.0, score + 0.1) que satura em 100% após poucos cliques.
+   * Com apenas 2 cliques, score atinge máximo e sistema não diferencia interesses.
+   * 
+   * SOLUÇÃO: Use PreferenceService.updateUserPreferences(userId) que:
+   * - Normaliza scores (soma = 1.0)
+   * - Aplica decay temporal
+   * - Considera feedback negativo
+   * 
+   * Este método foi mantido apenas para retrocompatibilidade.
+   * Novas implementações devem usar PreferenceService.
+   * 
    * @param {number} userId
    * @param {number} categoryId
-   * @param {number} increment - valor a incrementar (default: 0.1)
+   * @param {number} increment - IGNORADO no novo sistema
    */
   async incrementScore(userId, categoryId, increment = 0.1) {
+    console.warn(
+      `⚠️ DEPRECATED: UserCategoryPreference.incrementScore() causa saturação de scores!\n` +
+      `   Use PreferenceService.updateUserPreferences(${userId}) em vez disso.`
+    );
+    
+    // Mantém comportamento antigo para não quebrar código existente
+    // MAS adiciona aviso para que seja migrado
     const result = await query(
       `INSERT INTO user_category_preferences (user_id, category_id, preference_score)
        VALUES ($1, $2, $3)
@@ -96,12 +115,26 @@ const UserCategoryPreference = {
   },
 
   /**
-   * Decrementa score de preferência (baseado em skip/não interação)
+   * @deprecated ESTE MÉTODO FAZ PARTE DO SISTEMA ANTIGO!
+   * 
+   * PROBLEMA: Decremento fixo não considera:
+   * - Proporção de impressões vs cliques (CTR)
+   * - Decay temporal
+   * - Normalização relativa
+   * 
+   * SOLUÇÃO: O feedback negativo agora é calculado automaticamente por
+   * PreferenceService.applyNegativeFeedback(userId) baseado no CTR.
+   * 
    * @param {number} userId
    * @param {number} categoryId
-   * @param {number} decrement - valor a decrementar (default: 0.05)
+   * @param {number} decrement - IGNORADO no novo sistema
    */
   async decrementScore(userId, categoryId, decrement = 0.05) {
+    console.warn(
+      `⚠️ DEPRECATED: UserCategoryPreference.decrementScore() faz parte do sistema antigo!\n` +
+      `   O feedback negativo é calculado automaticamente por PreferenceService.`
+    );
+    
     const result = await query(
       `UPDATE user_category_preferences
        SET 
