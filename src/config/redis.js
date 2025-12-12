@@ -1,9 +1,9 @@
 /**
- * Redis Configuration - Upstash
- * Configuração do cache Redis usando Upstash REST API
+ * Redis Configuration
+ * Suporta Redis local (prioridade) ou Upstash REST API
  */
 
-import { Redis } from '@upstash/redis';
+import { createClient } from 'redis';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 
@@ -11,37 +11,70 @@ dotenv.config();
 
 let redis = null;
 let isConnected = false;
+let useLocalRedis = false;
 
 /**
- * Inicializa conexão com Upstash Redis
+ * Inicializa conexão com Redis
+ * Prioridade: Redis local > Upstash
  */
-function getRedisClient() {
-  if (redis) return redis;
+async function getRedisClient() {
+  if (redis && isConnected) return redis;
 
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  // Tenta Redis local primeiro
+  const localRedisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+  
+  // Se não tem Upstash configurado OU tem REDIS_URL, usa local
+  const hasUpstash = process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN;
+  const forceLocal = process.env.REDIS_URL || !hasUpstash;
 
-  if (!url || !token) {
-    console.warn('⚠️ UPSTASH_REDIS não configurado. Cache desabilitado.');
-    return null;
+  if (forceLocal) {
+    try {
+      redis = createClient({ url: localRedisUrl });
+      
+      redis.on('error', (err) => {
+        console.error('❌ Redis Error:', err.message);
+        isConnected = false;
+      });
+
+      redis.on('connect', () => {
+        console.log('✅ Conectado ao Redis local!');
+        isConnected = true;
+        useLocalRedis = true;
+      });
+
+      await redis.connect();
+      return redis;
+    } catch (error) {
+      console.error('❌ Erro ao conectar ao Redis local:', error.message);
+      console.warn('⚠️ Cache desabilitado.');
+      return null;
+    }
   }
 
-  try {
-    redis = new Redis({
-      url,
-      token,
-    });
-    isConnected = true;
-    console.log('✅ Conectado ao Upstash Redis!');
-    return redis;
-  } catch (error) {
-    console.error('❌ Erro ao conectar ao Upstash:', error.message);
-    return null;
+  // Fallback para Upstash (se configurado)
+  if (hasUpstash) {
+    try {
+      const { Redis } = await import('@upstash/redis');
+      redis = new Redis({
+        url: process.env.UPSTASH_REDIS_REST_URL,
+        token: process.env.UPSTASH_REDIS_REST_TOKEN,
+      });
+      isConnected = true;
+      useLocalRedis = false;
+      console.log('✅ Conectado ao Upstash Redis!');
+      return redis;
+    } catch (error) {
+      console.error('❌ Erro ao conectar ao Upstash:', error.message);
+      return null;
+    }
   }
+
+  console.warn('⚠️ Nenhum Redis configurado. Cache desabilitado.');
+  return null;
 }
 
 /**
- * Helper de cache
+ * Helper de cache - funciona com ambos Redis local e Upstash
  */
 const cache = {
   /**
@@ -49,7 +82,7 @@ const cache = {
    */
   async get(key) {
     try {
-      const client = getRedisClient();
+      const client = await getRedisClient();
       if (client) {
         return await client.get(key);
       }
@@ -64,9 +97,15 @@ const cache = {
    */
   async set(key, value, ttlSeconds = 3600) {
     try {
-      const client = getRedisClient();
+      const client = await getRedisClient();
       if (client) {
-        await client.set(key, value, { ex: ttlSeconds });
+        if (useLocalRedis) {
+          // Redis local usa EX como opção separada
+          await client.set(key, typeof value === 'string' ? value : JSON.stringify(value), { EX: ttlSeconds });
+        } else {
+          // Upstash usa formato diferente
+          await client.set(key, value, { ex: ttlSeconds });
+        }
         return true;
       }
     } catch (error) {
@@ -80,7 +119,7 @@ const cache = {
    */
   async del(key) {
     try {
-      const client = getRedisClient();
+      const client = await getRedisClient();
       if (client) {
         await client.del(key);
         return true;
@@ -96,10 +135,10 @@ const cache = {
    */
   async exists(key) {
     try {
-      const client = getRedisClient();
+      const client = await getRedisClient();
       if (client) {
         const result = await client.exists(key);
-        return result === 1;
+        return result === 1 || result === true;
       }
     } catch (error) {
       console.error('Cache exists error:', error.message);
@@ -112,7 +151,7 @@ const cache = {
    */
   async incr(key, ttlSeconds = 900) {
     try {
-      const client = getRedisClient();
+      const client = await getRedisClient();
       if (client) {
         const value = await client.incr(key);
         await client.expire(key, ttlSeconds);
@@ -129,10 +168,8 @@ const cache = {
    */
   async flushDedup() {
     try {
-      const client = getRedisClient();
+      const client = await getRedisClient();
       if (client) {
-        // Upstash não suporta SCAN diretamente, então usamos KEYS
-        // Em produção com muitos dados, isso pode ser lento
         const keys = await client.keys('dedup:*');
         if (keys && keys.length > 0) {
           for (const key of keys) {

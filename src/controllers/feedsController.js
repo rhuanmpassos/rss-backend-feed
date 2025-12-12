@@ -2,51 +2,19 @@
  * Feeds Controller
  * Controlador para endpoints de feeds RSS/JSON
  * 
- * ATUALIZADO: Inclui feed viciante (engagement-optimized)
+ * Feed principal: /feeds/addictive (ou /feeds/for-you)
+ * - Otimizado para engajamento máximo
+ * - Breaking news + Personalizado + Wildcards + Shuffle
  */
 
 import FeedGeneratorService from '../services/feedGeneratorService.js';
-import RecommendationService from '../services/recommendationService.js';
 import EngagementFeedService from '../services/engagementFeedService.js';
 import PredictionService from '../services/predictionService.js';
+import IntelligentFeedService from '../services/intelligentFeedService.js';
+import PreferenceService from '../services/preferenceService.js';
 import Article from '../models/Article.js';
 
 export const feedsController = {
-  /**
-   * GET /feeds/for-you
-   * GET /feeds/for-you.json
-   * Feed personalizado "For You" baseado em preferências do usuário
-   * Query: user_id (obrigatório), limit
-   */
-  async getForYouFeed(req, res) {
-    try {
-      const { user_id, limit = 50 } = req.query;
-
-      if (!user_id) {
-        return res.status(400).json({ 
-          success: false, 
-          error: 'user_id é obrigatório' 
-        });
-      }
-
-      const articles = await RecommendationService.getForYouFeed(
-        parseInt(user_id), 
-        parseInt(limit)
-      );
-
-      res.json({ 
-        success: true, 
-        data: articles,
-        count: articles.length,
-        feed_type: 'for_you'
-      });
-
-    } catch (error) {
-      console.error('Erro ao gerar feed For You:', error);
-      res.status(500).json({ success: false, error: error.message });
-    }
-  },
-
   /**
    * GET /feeds/chronological
    * GET /feeds/chronological.json
@@ -145,17 +113,17 @@ export const feedsController = {
     }
   },
 
-  // ==================== FEED VICIANTE ====================
+  // ==================== FEED PRINCIPAL (FOR YOU) ====================
 
   /**
-   * GET /feeds/addictive
-   * Feed otimizado para máximo engajamento
+   * GET /feeds/addictive (ou /feeds/for-you)
+   * Feed principal otimizado para máximo engajamento
    * 
    * Features:
-   * - Breaking news no topo
-   * - Artigos personalizados
-   * - Wildcards para descoberta
-   * - Shuffle parcial para imprevisibilidade
+   * - 🔴 Breaking news no topo (últimas 2h)
+   * - 🎯 Artigos personalizados por predição de clique
+   * - 🎲 Wildcards 12% para descoberta de conteúdo novo
+   * - 🔀 Shuffle parcial (posições 5-20) para imprevisibilidade
    * 
    * Query: user_id (obrigatório), limit, offset
    */
@@ -179,7 +147,7 @@ export const feedsController = {
         success: true,
         data: articles,
         count: articles.length,
-        feed_type: 'addictive',
+        feed_type: 'for_you',
         offset: parseInt(offset),
         has_more: articles.length === parseInt(limit)
       });
@@ -288,6 +256,112 @@ export const feedsController = {
           ...prediction,
           explanation
         }
+      });
+
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
+  // ==================== FEED INTELIGENTE (HIERÁRQUICO) ====================
+
+  /**
+   * GET /feeds/intelligent (ou /feeds/smart)
+   * Feed inteligente com scores hierárquicos e exploration/exploitation
+   * 
+   * Features:
+   * - 🎯 80% exploitation (baseado em preferências hierárquicas)
+   * - 🔍 20% exploration (descoberta de novos interesses)
+   * - 📊 Scores relativos (normalização softmax)
+   * - ⏰ Decay temporal (interesses antigos perdem peso)
+   * - 🚫 Feedback negativo implícito (CTR baixo = penalidade)
+   * 
+   * Query: user_id (obrigatório), limit, offset
+   */
+  async getIntelligentFeed(req, res) {
+    try {
+      const { user_id, limit = 50, offset = 0 } = req.query;
+
+      if (!user_id) {
+        return res.status(400).json({
+          success: false,
+          error: 'user_id é obrigatório'
+        });
+      }
+
+      const articles = await IntelligentFeedService.getPersonalizedFeed(
+        parseInt(user_id),
+        { limit: parseInt(limit), offset: parseInt(offset) }
+      );
+
+      res.json({
+        success: true,
+        data: articles,
+        count: articles.length,
+        feed_type: 'intelligent',
+        config: IntelligentFeedService.getConfig(),
+        offset: parseInt(offset),
+        has_more: articles.length === parseInt(limit)
+      });
+
+    } catch (error) {
+      console.error('Erro ao gerar feed inteligente:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
+  /**
+   * GET /feeds/preferences/:user_id
+   * Busca preferências hierárquicas do usuário (scores relativos)
+   */
+  async getUserPreferences(req, res) {
+    try {
+      const { user_id } = req.params;
+
+      if (!user_id) {
+        return res.status(400).json({
+          success: false,
+          error: 'user_id é obrigatório'
+        });
+      }
+
+      const preferences = await PreferenceService.getUserPreferences(parseInt(user_id));
+      const hierarchical = await PreferenceService.getHierarchicalPreferences(parseInt(user_id));
+
+      res.json({
+        success: true,
+        data: {
+          flat: preferences,
+          hierarchical
+        }
+      });
+
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
+  /**
+   * POST /feeds/preferences/:user_id/recalculate
+   * Recalcula preferências do usuário (normalização + decay + feedback negativo)
+   */
+  async recalculatePreferences(req, res) {
+    try {
+      const { user_id } = req.params;
+
+      if (!user_id) {
+        return res.status(400).json({
+          success: false,
+          error: 'user_id é obrigatório'
+        });
+      }
+
+      const result = await PreferenceService.updateUserPreferences(parseInt(user_id));
+
+      res.json({
+        success: true,
+        message: `Preferências recalculadas: ${result.updated} categorias`,
+        data: result.scores
       });
 
     } catch (error) {

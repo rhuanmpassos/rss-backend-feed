@@ -11,25 +11,43 @@ const router = express.Router();
 
 // ==================== FEEDS PERSONALIZADOS ====================
 
-// Feed "For You" personalizado (original)
-router.get('/for-you', feedsController.getForYouFeed);
-router.get('/for-you.json', feedsController.getForYouFeed);
-
-// 🔥 Feed "Addictive" - Otimizado para engajamento
+// 🔥 Feed "For You" - Otimizado para engajamento
 // - Breaking news no topo
-// - Personalizado + Wildcards
+// - Personalizado por usuário
+// - Wildcards para descoberta (12%)
 // - Shuffle para imprevisibilidade
 router.get('/addictive', feedsController.getAddictiveFeed);
 router.get('/addictive.json', feedsController.getAddictiveFeed);
+// Alias para compatibilidade (app pode chamar /for-you ou /addictive)
+router.get('/for-you', feedsController.getAddictiveFeed);
+router.get('/for-you.json', feedsController.getAddictiveFeed);
 
 // Mais conteúdo (para scroll infinito)
 router.get('/addictive/more', feedsController.getMoreContent);
+router.get('/for-you/more', feedsController.getMoreContent);
 
 // Breaking News (últimas 2h)
 router.get('/breaking', feedsController.getBreakingNews);
 
 // Predição de clique
 router.get('/predict', feedsController.predictClick);
+
+// ==================== FEED INTELIGENTE (NOVO) ====================
+
+// 🧠 Feed Inteligente - Hierárquico com Exploration/Exploitation
+// - 80% exploitation (preferências hierárquicas)
+// - 20% exploration (descoberta de novos interesses)
+// - Scores relativos (softmax normalization)
+// - Decay temporal + feedback negativo
+router.get('/intelligent', feedsController.getIntelligentFeed);
+router.get('/intelligent.json', feedsController.getIntelligentFeed);
+router.get('/smart', feedsController.getIntelligentFeed); // Alias
+
+// Preferências hierárquicas do usuário (scores relativos)
+router.get('/preferences/:user_id', feedsController.getUserPreferences);
+
+// Recalcular preferências (force update)
+router.post('/preferences/:user_id/recalculate', feedsController.recalculatePreferences);
 
 // ==================== FEEDS BÁSICOS ====================
 

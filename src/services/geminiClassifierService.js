@@ -1,20 +1,22 @@
 /**
- * Gemini Classifier Service - Classificação Livre (categorias dinâmicas)
- * Gemini classifica livremente, sem lista fixa de categorias
- * Categorias são criadas automaticamente no banco via categoryService
- * Embeddings são gerados para cada artigo classificado
+ * Gemini Classifier Service - Classificação Hierárquica IPTC
+ * Usa taxonomia IPTC Media Topics para classificação em até 3 níveis
+ * Suporta multi-label (artigo pode pertencer a múltiplas categorias)
+ * 
+ * ATUALIZADO: Agora usa HierarchicalClassifierService para classificação científica
  */
 
 import axios from 'axios';
 import Article from '../models/Article.js';
 import CategoryService from './categoryService.js';
+import HierarchicalClassifierService from './hierarchicalClassifierService.js';
 import EmbeddingService from './embeddingService.js';
 import sseManager from './sseManager.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Estados brasileiros (para contexto de localização, não para categoria)
+// Estados brasileiros (para contexto de localização)
 const BRAZILIAN_STATES = [
   'Acre', 'Alagoas', 'Amapá', 'Amazonas', 'Bahia', 'Ceará', 'Distrito Federal',
   'Espírito Santo', 'Goiás', 'Maranhão', 'Mato Grosso', 'Mato Grosso do Sul',
@@ -25,6 +27,9 @@ const BRAZILIAN_STATES = [
 
 const VERTEX_URL = 'https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash-lite:streamGenerateContent';
 
+// Flag para usar classificação hierárquica (pode ser desabilitado para fallback)
+const USE_HIERARCHICAL = true;
+
 // Delay entre requests (em ms) - ajuste conforme tier
 const REQUEST_DELAY = 1000; // 1 segundo entre requests
 const RATE_LIMIT_DELAY = 60000; // 1 minuto se rate limited
@@ -32,7 +37,7 @@ const RATE_LIMIT_DELAY = 60000; // 1 minuto se rate limited
 const GeminiClassifierService = {
   /**
    * Classifica um artigo usando Gemini via Vertex AI
-   * Classificação LIVRE - Gemini escolhe a categoria mais específica
+   * NOVO: Usa classificação hierárquica IPTC com 3 níveis
    * Retorna null se não conseguir (rate limit) - artigo fica sem categoria para tentar depois
    */
   async classifyArticle(title, summary = '') {
@@ -40,71 +45,15 @@ const GeminiClassifierService = {
 
     if (!apiKey) {
       console.warn('⚠️ GEMINI_API_KEY não configurada!');
-      return null; // Retorna null, artigo será classificado depois
+      return null;
     }
 
     const text = summary ? `${title}. ${summary}` : title;
 
-    // Prompt para classificação baseada em CONTEXTO e INTERESSES REAIS
-    const prompt = `Você é um classificador de notícias brasileiras especializado.
-Classifique este artigo analisando o CONTEXTO e pensando em INTERESSES REAIS.
-
-TEXTO: "${text}"
-
-REGRA DE OURO - ANALISE O CONTEXTO:
-O mesmo assunto pode ter categorias diferentes dependendo do contexto:
-
-ENERGIA ELÉTRICA:
-- "Conta de luz sobe 5%" → Economia (é sobre preço/custo)
-- "SP sem luz após ventania" → Clima (consequência climática)
-- "Hackers atacam rede elétrica" → Tecnologia (ataque cibernético)
-- "Governo anuncia subsídio de energia" → Política (decisão governamental)
-
-TRÂNSITO:
-- "Acidente mata 3 na BR-101" → Segurança (acidente/tragédia)
-- "Chuva alaga ruas e para trânsito" → Clima (consequência climática)
-- "Prefeitura anuncia novo pedágio" → Política (decisão governamental)
-- "Uber lança novo serviço" → Tecnologia (inovação tech)
-
-SEMPRE PERGUNTE: "Qual é a CAUSA ou TEMA PRINCIPAL da notícia?"
-
-CATEGORIAS ESPECÍFICAS (interesses reais que pessoas seguem):
-- Esportes: Futebol, Fórmula 1, MMA/UFC, Tênis, Basquete, Vôlei
-- Tech: Inteligência Artificial, Games, Apple, Android
-- Finanças: Bitcoin, Criptomoedas, Bolsa de Valores
-- Entretenimento: Cinema, Séries, K-Pop, Música
-
-CATEGORIAS AMPLAS (use baseado no CONTEXTO):
-- Política: decisões de governo, votações, eleições, STF, Congresso
-- Economia: preços, inflação, PIB, mercado, custos
-- Tecnologia: inovações, apps, hacks, lançamentos tech
-- Segurança: crimes, acidentes, prisões, violência
-- Saúde: doenças, vacinas, hospitais, epidemias
-- Clima: tempestades, secas, consequências climáticas
-- Meio Ambiente: desmatamento, queimadas, poluição
-
-REGRAS:
-1. ANALISE O CONTEXTO - não classifique por palavras-chave
-2. Interesse específico real → categoria específica (Futebol, F1, Bitcoin)
-3. Evento/situação → categoria ampla baseada no CONTEXTO
-4. TIMES DE FUTEBOL NÃO SÃO LOCALIZAÇÃO
-5. Estados válidos: ${BRAZILIAN_STATES.join(', ')}
-
-FORMATO (APENAS JSON):
-{"category":"CATEGORIA","confidence":0.95,"location":"ESTADO_OU_null"}
-
-EXEMPLOS CONTEXTUAIS:
-- "Câmara vota cassação" → {"category":"Política","confidence":0.98,"location":null}
-- "Tarifa de luz sobe 10%" → {"category":"Economia","confidence":0.95,"location":null}
-- "Apagão em SP após temporal" → {"category":"Clima","confidence":0.95,"location":"São Paulo"}
-- "Hamilton vence GP" → {"category":"Fórmula 1","confidence":0.98,"location":null}
-- "Flamengo contrata" → {"category":"Futebol","confidence":0.98,"location":null}
-- "Bitcoin bate recorde" → {"category":"Bitcoin","confidence":0.95,"location":null}
-- "ChatGPT nova versão" → {"category":"Inteligência Artificial","confidence":0.95,"location":null}
-- "Acidente grave na rodovia" → {"category":"Segurança","confidence":0.90,"location":null}
-- "Temporal derruba árvores" → {"category":"Clima","confidence":0.95,"location":null}
-
-Retorne APENAS o JSON.`;
+    // Usa prompt hierárquico IPTC se habilitado
+    const prompt = USE_HIERARCHICAL 
+      ? HierarchicalClassifierService.generatePrompt(text)
+      : this.getLegacyPrompt(text);
 
     try {
       const response = await axios.post(
@@ -133,29 +82,55 @@ Retorne APENAS o JSON.`;
         responseText = response.data.candidates[0].content.parts[0].text;
       }
 
-      // Extrai JSON da resposta
-      const jsonMatch = responseText.match(/\{[\s\S]*?\}/);
+      // Extrai JSON da resposta (pode ser objeto aninhado para hierárquico)
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         console.warn('   ⚠️ Gemini não retornou JSON válido');
-        return null; // Tenta novamente depois
+        return null;
       }
 
       const parsed = JSON.parse(jsonMatch[0]);
 
-      // Valida que temos uma categoria
-      if (!parsed.category || typeof parsed.category !== 'string') {
+      // Delay para evitar rate limit
+      await new Promise(r => setTimeout(r, REQUEST_DELAY));
+
+      // NOVO: Processa resposta hierárquica se habilitado
+      if (USE_HIERARCHICAL && parsed.primary) {
+        console.log('   ✅ Gemini classificou (hierárquico)!');
+        
+        // Processa classificação hierárquica
+        const hierarchicalResult = await HierarchicalClassifierService.processClassification(parsed);
+        
+        if (hierarchicalResult.primary) {
+          return {
+            // Compatibilidade com formato antigo
+            category: hierarchicalResult.primary.category_name,
+            confidence: hierarchicalResult.primary.confidence,
+            location: parsed.location === 'null' || !parsed.location ? null : parsed.location,
+            method: 'gemini-hierarchical',
+            // Novos campos hierárquicos
+            hierarchical: hierarchicalResult,
+            category_id: hierarchicalResult.primary.category_id,
+            category_path: hierarchicalResult.primary.category_path,
+            category_level: hierarchicalResult.primary.level,
+            categories: hierarchicalResult.categories
+          };
+        }
+      }
+
+      // Fallback: formato legado (categoria única)
+      if (!parsed.category && !parsed.primary) {
         console.warn('   ⚠️ Categoria inválida retornada pelo Gemini');
         return null;
       }
 
+      const categoryName = parsed.category || parsed.primary?.level2 || parsed.primary?.level1;
+      
       console.log('   ✅ Gemini classificou com sucesso!');
 
-      // Delay para evitar rate limit
-      await new Promise(r => setTimeout(r, REQUEST_DELAY));
-
       return {
-        category: parsed.category.trim(),
-        confidence: Math.min(0.99, Math.max(0.5, parsed.confidence || 0.9)),
+        category: categoryName.trim(),
+        confidence: Math.min(0.99, Math.max(0.5, parsed.confidence || parsed.primary?.confidence || 0.9)),
         location: parsed.location === 'null' || !parsed.location ? null : parsed.location,
         method: 'gemini'
       };
@@ -262,6 +237,49 @@ Retorne APENAS o JSON.`;
     console.log(`\n   📊 Resultado: ${processed} classificados, ${pending} pendentes (${duration}s)`);
 
     return { processed, pending, duration: parseFloat(duration) };
+  },
+
+  /**
+   * Prompt legado (para fallback se hierárquico desabilitado)
+   * @param {string} text
+   */
+  getLegacyPrompt(text) {
+    return `Você é um classificador de notícias brasileiras especializado.
+Classifique este artigo analisando o CONTEXTO e pensando em INTERESSES REAIS.
+
+TEXTO: "${text}"
+
+REGRA DE OURO - ANALISE O CONTEXTO:
+O mesmo assunto pode ter categorias diferentes dependendo do contexto:
+
+ENERGIA ELÉTRICA:
+- "Conta de luz sobe 5%" → Economia (é sobre preço/custo)
+- "SP sem luz após ventania" → Clima (consequência climática)
+- "Hackers atacam rede elétrica" → Tecnologia (ataque cibernético)
+
+CATEGORIAS ESPECÍFICAS (interesses reais):
+- Esportes: Futebol, Fórmula 1, MMA/UFC, Tênis, Basquete
+- Tech: Inteligência Artificial, Games, Apple, Android
+- Finanças: Bitcoin, Criptomoedas, Bolsa de Valores
+- Entretenimento: Cinema, Séries, K-Pop, Música
+
+CATEGORIAS AMPLAS (baseado no CONTEXTO):
+- Política: governo, votações, eleições, STF, Congresso
+- Economia: preços, inflação, PIB, mercado
+- Tecnologia: inovações, apps, hacks
+- Segurança: crimes, acidentes, prisões
+- Saúde: doenças, vacinas, hospitais
+- Clima: tempestades, consequências climáticas
+- Meio Ambiente: desmatamento, poluição
+
+REGRAS:
+1. ANALISE O CONTEXTO - não classifique por palavras-chave
+2. Estados válidos: ${BRAZILIAN_STATES.join(', ')}
+
+FORMATO JSON:
+{"category":"CATEGORIA","confidence":0.95,"location":"ESTADO_OU_null"}
+
+Retorne APENAS o JSON.`;
   }
 };
 

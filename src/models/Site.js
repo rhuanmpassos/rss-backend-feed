@@ -92,12 +92,18 @@ const Site = {
   },
 
   /**
-   * Deleta site e limpa TUDO relacionado
+   * Deleta site e limpa TUDO relacionado (banco + Redis)
    */
   async delete(id) {
     // Busca artigos do site antes de deletar (para limpar Redis)
     const articlesResult = await query(
       'SELECT url, title FROM articles WHERE site_id = $1',
+      [id]
+    );
+
+    // Busca dados do site para limpar rate limit
+    const siteResult = await query(
+      'SELECT url FROM sites WHERE id = $1',
       [id]
     );
 
@@ -108,29 +114,47 @@ const Site = {
     );
 
     // Limpa cache Redis dos artigos desse site
-    if (result.rows[0] && articlesResult.rows.length > 0) {
+    if (result.rows[0]) {
       try {
-        const { cache, normalizeUrl, hashTitle } = await import('../config/redis.js');
+        const { cache } = await import('../config/redis.js');
         const crypto = await import('crypto');
+        let keysDeleted = 0;
 
+        // Remove cache de cada artigo
         for (const article of articlesResult.rows) {
           try {
-            // Remove cache de URL (usa mesmo hash que ao criar)
-            const normalizedUrl = normalizeUrl(article.url);
-            const urlHash = crypto.createHash('md5').update(normalizedUrl).digest('hex').slice(0, 16);
-            await cache.del(`dedup:url:${urlHash}`);
+            // Remove cache de URL (formato: article:url:URL_COMPLETA)
+            await cache.del(`article:url:${article.url}`);
+            keysDeleted++;
 
-            // Remove cache de título (usa mesmo hash que ao criar)
-            const titleHash = hashTitle(article.title);
-            await cache.del(`dedup:title:${titleHash}`);
+            // Remove cache de título (formato: article:title:HASH)
+            const titleNormalized = article.title
+              .toLowerCase()
+              .replace(/[^\w\s]/g, '')
+              .replace(/\s+/g, ' ')
+              .trim();
+            const titleHash = crypto.createHash('md5').update(titleNormalized).digest('hex');
+            await cache.del(`article:title:${titleHash}`);
+            keysDeleted++;
           } catch (e) {
-            // Redis pode não estar disponível, continua
+            // Continua mesmo com erro
           }
         }
 
-        console.log(`🗑️ Site deletado + ${articlesResult.rows.length} artigos limpos do cache`);
+        // Remove rate limit do domínio do site
+        if (siteResult.rows[0]) {
+          try {
+            const siteUrl = new URL(siteResult.rows[0].url);
+            await cache.del(`ratelimit:${siteUrl.hostname}`);
+            keysDeleted++;
+          } catch (e) {
+            // Ignora erro de parsing de URL
+          }
+        }
+
+        console.log(`🗑️ Site deletado: ${articlesResult.rows.length} artigos + ${keysDeleted} chaves Redis`);
       } catch (e) {
-        console.log(`🗑️ Site deletado (cache não disponível)`);
+        console.log(`🗑️ Site deletado (Redis: ${e.message})`);
       }
     }
 

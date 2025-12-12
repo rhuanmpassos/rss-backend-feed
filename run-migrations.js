@@ -117,6 +117,47 @@ async function checkLearningTables() {
   }
 }
 
+async function checkHierarchyTables() {
+  try {
+    // Verifica estrutura hierárquica
+    const catLevels = await pool.query(`
+      SELECT 
+        'Nível ' || COALESCE(level::text, '?') as nivel,
+        COUNT(*) as total
+      FROM categories
+      GROUP BY level
+      ORDER BY level
+    `);
+    console.log('\n🏗️  Categorias Hierárquicas (IPTC):');
+    console.table(catLevels.rows);
+
+    // Verifica article_categories
+    const articleCats = await pool.query(`
+      SELECT 
+        'Article Categories' as tabela, 
+        COUNT(*) as total,
+        COUNT(DISTINCT article_id) as artigos_unicos
+      FROM article_categories
+    `);
+    console.log('\n📦 Relacionamento Artigo-Categoria (N:N):');
+    console.table(articleCats.rows);
+
+    // Verifica preferências hierárquicas
+    const hierPrefs = await pool.query(`
+      SELECT 
+        'User Hierarchical Preferences' as tabela,
+        COUNT(*) as total,
+        COUNT(DISTINCT user_id) as usuarios
+      FROM user_hierarchical_preferences
+    `);
+    console.log('\n👤 Preferências Hierárquicas:');
+    console.table(hierPrefs.rows);
+
+  } catch (error) {
+    console.log('\n🏗️  Tabelas hierárquicas ainda não configuradas:', error.message);
+  }
+}
+
 async function main() {
   console.log('🚀 Iniciando migrações do banco de dados...\n');
   
@@ -170,17 +211,76 @@ async function main() {
     console.log('⚠️  Erro ao verificar password_hash:', error.message);
     await runMigration('009_add_password_hash.sql');
   }
+
+  // ============================================
+  // NOVAS MIGRATIONS: Sistema Hierárquico IPTC
+  // ============================================
+  console.log('\n🏗️  Sistema Hierárquico IPTC:');
+  
+  // Migration 010: Estrutura hierárquica
+  try {
+    const checkParentId = await pool.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'categories' AND column_name = 'parent_id'
+    `);
+    if (checkParentId.rows.length === 0) {
+      await runMigration('010_hierarchical_categories.sql');
+    } else {
+      console.log('⏭️  Estrutura hierárquica já existe. Pulando migração 010.');
+    }
+  } catch (error) {
+    console.log('⚠️  Erro ao verificar hierarquia:', error.message);
+    await runMigration('010_hierarchical_categories.sql');
+  }
+
+  // Migration 011: Seed categorias IPTC
+  try {
+    const checkIPTC = await pool.query(`
+      SELECT COUNT(*) as count FROM categories WHERE iptc_code IS NOT NULL
+    `);
+    if (parseInt(checkIPTC.rows[0].count) < 10) {
+      await runMigration('011_seed_iptc_categories.sql');
+    } else {
+      console.log('⏭️  Categorias IPTC já populadas. Pulando migração 011.');
+    }
+  } catch (error) {
+    // Se coluna não existe, rodar migration 010 primeiro
+    console.log('⚠️  Rodando seed IPTC...');
+    await runMigration('011_seed_iptc_categories.sql');
+  }
+
+  // Migration 012: Migrar dados existentes para hierarquia
+  try {
+    const checkArticleCategories = await tableExists('article_categories');
+    if (!checkArticleCategories) {
+      await runMigration('012_migrate_to_hierarchy.sql');
+    } else {
+      const checkData = await pool.query(`SELECT COUNT(*) as count FROM article_categories`);
+      if (parseInt(checkData.rows[0].count) === 0) {
+        console.log('📦 Tabela article_categories vazia, executando migração de dados...');
+        await runMigration('012_migrate_to_hierarchy.sql');
+      } else {
+        console.log('⏭️  Dados já migrados. Pulando migração 012.');
+      }
+    }
+  } catch (error) {
+    console.log('⚠️  Executando migração de dados para hierarquia...');
+    await runMigration('012_migrate_to_hierarchy.sql');
+  }
   
   // Mostra estado depois
   await showStats();
   await checkUsersTable();
   await checkLearningTables();
+  await checkHierarchyTables();
   
   console.log('\n✅ Migrações concluídas!');
   console.log('\n📋 Próximos passos:');
-  console.log('   1. Verifique se as tabelas de aprendizado foram criadas');
-  console.log('   2. O sistema de engajamento está pronto para uso');
-  console.log('   3. Teste os endpoints: /feeds/addictive, /api/interactions');
+  console.log('   1. Sistema hierárquico IPTC configurado');
+  console.log('   2. Scores relativos disponíveis via PreferenceService');
+  console.log('   3. Feed inteligente disponível via IntelligentFeedService');
+  console.log('   4. Teste: node -e "import(\'./src/services/preferenceService.js\')"');
   
   process.exit(0);
 }
