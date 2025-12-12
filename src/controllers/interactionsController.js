@@ -70,6 +70,21 @@ export const interactionsController = {
       const validInteractions = [];
       const validTypes = ['click', 'view', 'scroll_stop', 'impression'];
 
+      // Coleta IDs únicos de artigos para verificar existência em batch
+      const articleIds = [...new Set(
+        interactions
+          .filter(i => i.article_id)
+          .map(i => parseInt(i.article_id))
+          .filter(id => !isNaN(id))
+      )];
+
+      // Verifica quais artigos existem no banco
+      let existingArticleIds = new Set();
+      if (articleIds.length > 0) {
+        const existingArticles = await Article.findByIds(articleIds);
+        existingArticleIds = new Set(existingArticles.map(a => a.id));
+      }
+
       for (const interaction of interactions) {
         if (!interaction.article_id || !interaction.interaction_type) {
           continue; // Pula interações inválidas
@@ -79,9 +94,16 @@ export const interactionsController = {
           continue; // Pula tipos inválidos
         }
 
+        const articleId = parseInt(interaction.article_id);
+        
+        // VALIDAÇÃO: Pula se o artigo não existe no banco
+        if (isNaN(articleId) || !existingArticleIds.has(articleId)) {
+          continue; // Artigo não existe, pula silenciosamente
+        }
+
         validInteractions.push({
           userId: user_id,
-          articleId: interaction.article_id,
+          articleId: articleId,
           interactionType: interaction.interaction_type,
           duration: interaction.duration || null,
           position: interaction.position || null,
@@ -92,9 +114,11 @@ export const interactionsController = {
       }
 
       if (validInteractions.length === 0) {
-        return res.status(400).json({ 
-          success: false, 
-          error: 'Nenhuma interação válida encontrada' 
+        // Retorna sucesso mesmo sem interações válidas (artigos podem ter sido deletados)
+        return res.json({ 
+          success: true, 
+          message: 'Nenhuma interação válida para processar (artigos podem não existir mais)',
+          data: { count: 0, skipped: interactions.length }
         });
       }
 

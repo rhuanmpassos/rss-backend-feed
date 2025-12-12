@@ -122,8 +122,8 @@ const Article = {
    */
   async findById(id) {
     const result = await query(
-      `SELECT a.*, 
-              s.name as site_name, 
+      `SELECT a.*,
+              s.name as site_name,
               s.url as site_url,
               c.id as category_id,
               c.name as category_name,
@@ -135,6 +135,21 @@ const Article = {
       [id]
     );
     return result.rows[0];
+  },
+
+  /**
+   * Busca múltiplos artigos por IDs
+   * @param {number[]} ids - Array de IDs de artigos
+   * @returns {Array} Artigos encontrados (apenas os que existem)
+   */
+  async findByIds(ids) {
+    if (!ids || ids.length === 0) return [];
+    
+    const result = await query(
+      `SELECT id FROM articles WHERE id = ANY($1)`,
+      [ids]
+    );
+    return result.rows;
   },
 
   /**
